@@ -20,13 +20,13 @@ type Message struct {
 	CreatedAt   int64
 }
 
-// Repo — только persistence
+// Repo — persistence
 type Repo interface {
 	SaveMessage(ctx context.Context, msg *Message) error
 	GetHistory(ctx context.Context, chatID string) ([]Message, error)
 }
 
-// Service — оркестрация + возврат ответа в Chatra
+// Service — оркестрация (без return)
 type Service interface {
-	HandleIncoming(ctx context.Context, msg *Message) (string, error)
+	HandleIncoming(ctx context.Context, msg *Message) error
 }

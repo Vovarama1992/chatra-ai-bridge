@@ -51,10 +51,11 @@ func main() {
 		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "X-Webhook-Secret"},
 	}))
 
-	// --- Chatra module wiring ---
 	chatraRepo := chatra.NewRepo(db)
 	aiClient := ai.NewOpenAIClient()
-	chatraService := chatra.NewService(chatraRepo, aiClient)
+	chatraOutbound := chatra.NewChatraOutbound()
+
+	chatraService := chatra.NewService(chatraRepo, aiClient, chatraOutbound)
 	chatraHandler := chatra.NewHandler(chatraService)
 
 	chatra.RegisterRoutes(r, chatraHandler)

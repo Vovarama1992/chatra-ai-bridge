@@ -40,14 +40,11 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		SupporterID: payload.SupporterID,
 	}
 
-	reply, err := h.svc.HandleIncoming(r.Context(), msg)
-	if err != nil {
+	if err := h.svc.HandleIncoming(r.Context(), msg); err != nil {
 		http.Error(w, "processing error", http.StatusInternalServerError)
 		return
 	}
 
-	// Ответ сразу обратно в Chatra
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"text": reply,
-	})
+	// Chatra ответ не ждёт — просто ACK
+	w.WriteHeader(http.StatusOK)
 }
