@@ -1,0 +1,18 @@
+# env
+.env
+
+# go
+/bin/
+/dist/
+*.exe
+*.test
+
+# docker
+*.log
+
+# os
+.DS_Store
+
+# editor
+.vscode/
+.idea/
