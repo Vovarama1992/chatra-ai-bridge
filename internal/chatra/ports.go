@@ -20,6 +20,11 @@ type Message struct {
 	CreatedAt   int64
 }
 
+type Outbound interface {
+	SendToChat(ctx context.Context, chatID string, text string) error
+	SendNote(ctx context.Context, chatID string, text string) error
+}
+
 // Repo — persistence
 type Repo interface {
 	SaveMessage(ctx context.Context, msg *Message) error

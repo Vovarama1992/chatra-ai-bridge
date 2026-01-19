@@ -11,11 +11,6 @@ import (
 
 const confidenceThreshold = 0.7
 
-type Outbound interface {
-	SendToChat(ctx context.Context, chatID string, text string) error
-	SendToAdmin(ctx context.Context, adminID string, text string) error
-}
-
 type service struct {
 	repo     Repo
 	ai       ai.AI
@@ -36,46 +31,21 @@ type aiResponse struct {
 }
 
 func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
-	// 1) save incoming
-	if err := s.repo.SaveMessage(ctx, msg); err != nil {
-		return err
-	}
-
-	// 2) history
+	// 1) подгружаем ИСТОРИЮ (только прошлые сообщения)
 	history, err := s.repo.GetHistory(ctx, msg.ChatID)
 	if err != nil {
 		return err
 	}
 
-	// 3) prompt + history
+	// 2) собираем GPT-контекст
 	aiHistory := []ai.Message{
 		{
 			Role: "system",
-			Text: `Ты ассистент службы поддержки.
-
-Твоя задача:
-1) Дать лучший возможный ответ пользователю.
-2) Оценить УВЕРЕННОСТЬ (confidence), можно ли отвечать без оператора.
-
-Что такое confidence:
-- 1.0 — полностью уверен, стандартный вопрос.
-- 0.7–0.9 — почти уверен, возможны нюансы.
-- 0.4–0.6 — есть сомнения, лучше оператор.
-- < 0.4 — нужен человек.
-
-Правила:
-- confidence — число от 0 до 1.
-- Не завышай confidence.
-- Деньги, возвраты, аккаунты, юридические вопросы → низкий confidence.
-
-Верни СТРОГО JSON:
-{
-  "answer": "ответ пользователю",
-  "confidence": 0.0
-}`,
+			Text: BaseSystemPrompt + "\n\n" + NotVPNDomainPrompt,
 		},
 	}
 
+	// 3) прошлые сообщения
 	for _, m := range history {
 		role := "user"
 		if m.Sender == SenderAI || m.Sender == SenderSupporter {
@@ -87,7 +57,13 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		})
 	}
 
-	// 4) GPT
+	// 4) ТЕКУЩЕЕ сообщение пользователя (отдельно, последним)
+	aiHistory = append(aiHistory, ai.Message{
+		Role: "user",
+		Text: msg.Text,
+	})
+
+	// 5) запрос в GPT
 	ctxAI, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
@@ -101,15 +77,22 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return errors.New("invalid AI response format")
 	}
 
-	// 5) low confidence → admin
-	if resp.Confidence < confidenceThreshold {
-		if msg.SupporterID == nil {
-			return errors.New("supporter_id required for low confidence flow")
-		}
-		return s.outbound.SendToAdmin(ctx, *msg.SupporterID, resp.Answer)
+	// 6) сохраняем входящее сообщение пользователя
+	if err := s.repo.SaveMessage(ctx, msg); err != nil {
+		return err
 	}
 
-	// 6) high confidence → save + client
+	// 7) low confidence → внутренняя заметка оператору
+	if resp.Confidence < confidenceThreshold {
+		note :=
+			"[AI, low confidence]\n" +
+				"confidence=" + formatFloat(resp.Confidence) + "\n\n" +
+				resp.Answer
+
+		return s.outbound.SendNote(ctx, msg.ChatID, note)
+	}
+
+	// 8) high confidence → сохраняем ответ AI
 	if err := s.repo.SaveMessage(ctx, &Message{
 		ChatID: msg.ChatID,
 		Sender: SenderAI,
@@ -118,5 +101,18 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return err
 	}
 
+	// 9) отправляем клиенту
 	return s.outbound.SendToChat(ctx, msg.ChatID, resp.Answer)
+}
+
+// локально, чтобы не тащить fmt в hot path
+func formatFloat(v float64) string {
+	switch {
+	case v >= 1:
+		return "1.0"
+	case v <= 0:
+		return "0.0"
+	default:
+		return string([]byte{'0' + byte(v*10)})
+	}
 }

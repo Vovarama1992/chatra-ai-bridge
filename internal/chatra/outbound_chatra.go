@@ -30,20 +30,37 @@ func NewChatraOutbound() *ChatraOutbound {
 	}
 }
 
-func (c *ChatraOutbound) SendToChat(ctx context.Context, chatID string, text string) error {
+// Отправка сообщения клиенту (видит клиент)
+func (c *ChatraOutbound) SendToChat(
+	ctx context.Context,
+	chatID string,
+	text string,
+) error {
 	return c.send(ctx, "/chats/"+chatID+"/messages", map[string]any{
 		"text": text,
 	})
 }
 
-func (c *ChatraOutbound) SendToAdmin(ctx context.Context, adminID string, text string) error {
-	return c.send(ctx, "/admins/"+adminID+"/messages", map[string]any{
+// Отправка internal note (видят только операторы)
+func (c *ChatraOutbound) SendNote(
+	ctx context.Context,
+	chatID string,
+	text string,
+) error {
+	return c.send(ctx, "/chats/"+chatID+"/notes", map[string]any{
 		"text": text,
 	})
 }
 
-func (c *ChatraOutbound) send(ctx context.Context, path string, body any) error {
-	b, _ := json.Marshal(body)
+func (c *ChatraOutbound) send(
+	ctx context.Context,
+	path string,
+	body any,
+) error {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
 
 	req, err := http.NewRequestWithContext(
 		ctx,
