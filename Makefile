@@ -1,3 +1,6 @@
+-include .env
+export
+
 .PHONY: refresh full-refresh build up down logs build-front commit migrate db app-logs
 
 # --- быстрый диплой ---
@@ -45,8 +48,7 @@ commit:
 
 # --- миграции ---
 migrate:
-	cat migrations/*.sql | docker exec -i chatra_ai_bridge_db psql -U $$POSTGRES_USER -d $$POSTGRES_DB
+	cat migrations/*.sql | docker exec -i chatra_ai_bridge_db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
 
-# --- зайти в PostgreSQL ---
 db:
-	docker exec -it chatra_ai_bridge_db psql -U $$POSTGRES_USER -d $$POSTGRES_DB
+	docker exec -it chatra_ai_bridge_db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
