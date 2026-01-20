@@ -16,10 +16,15 @@ func NewHandler(svc Service) *Handler {
 // HandleWebhook — вход от Chatra
 func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		ChatID      string  `json:"chat_id"`
-		Text        string  `json:"text"`
-		ClientID    *string `json:"client_id"`
-		SupporterID *string `json:"supporter_id"`
+		EventName string `json:"eventName"`
+		Messages  []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"messages"`
+		Client struct {
+			ChatID string `json:"chatId"`
+			ID     string `json:"id"`
+		} `json:"client"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -27,24 +32,32 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if payload.ChatID == "" || payload.Text == "" {
-		http.Error(w, "missing chat_id or text", http.StatusBadRequest)
+	// Нас интересует только chatFragment
+	if payload.EventName != "chatFragment" {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	msg := &Message{
-		ChatID:      payload.ChatID,
-		Sender:      SenderClient,
-		Text:        payload.Text,
-		ClientID:    payload.ClientID,
-		SupporterID: payload.SupporterID,
+	// Берём все сообщения клиента
+	for _, m := range payload.Messages {
+		if m.Type != "client" || m.Text == "" {
+			continue
+		}
+
+		msg := &Message{
+			ChatID:   payload.Client.ChatID,
+			Sender:   SenderClient,
+			Text:     m.Text,
+			ClientID: &payload.Client.ID,
+			// SupporterID пока nil
+		}
+
+		if err := h.svc.HandleIncoming(r.Context(), msg); err != nil {
+			http.Error(w, "processing error", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	if err := h.svc.HandleIncoming(r.Context(), msg); err != nil {
-		http.Error(w, "processing error", http.StatusInternalServerError)
-		return
-	}
-
-	// Chatra ответ не ждёт — просто ACK
+	// ACK для Chatra
 	w.WriteHeader(http.StatusOK)
 }
