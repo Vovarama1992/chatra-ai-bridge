@@ -1,6 +1,7 @@
 package chatra
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -35,44 +36,53 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[chatra] event=%s chatId=%s clientId=%s messages=%d\n",
+	log.Printf(
+		"[chatra] event=%s chatId=%s clientId=%s messages=%d",
 		payload.EventName,
 		payload.Client.ChatID,
 		payload.Client.ID,
 		len(payload.Messages),
 	)
 
+	// ACK СРАЗУ
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+
 	if payload.EventName != "chatFragment" {
 		log.Println("[chatra] skip non chatFragment")
-		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	for i, m := range payload.Messages {
-		log.Printf("[chatra] msg[%d] type=%s text=%q\n", i, m.Type, m.Text)
+	p := payload
 
-		if m.Type != "client" || m.Text == "" {
-			continue
+	// ВСЯ ОБРАБОТКА — В ФОНЕ
+	go func() {
+		ctx := context.Background()
+
+		for i, m := range p.Messages {
+			log.Printf("[chatra] msg[%d] type=%s text=%q", i, m.Type, m.Text)
+
+			if m.Type != "client" || m.Text == "" {
+				continue
+			}
+
+			msg := &Message{
+				ChatID:   p.Client.ChatID,
+				Sender:   SenderClient,
+				Text:     m.Text,
+				ClientID: &p.Client.ID,
+			}
+
+			log.Println("[chatra] -> HandleIncoming start")
+
+			if err := h.svc.HandleIncoming(ctx, msg); err != nil {
+				log.Println("[chatra] HandleIncoming error:", err)
+				continue
+			}
+
+			log.Println("[chatra] -> HandleIncoming done")
 		}
+	}()
 
-		msg := &Message{
-			ChatID:   payload.Client.ChatID,
-			Sender:   SenderClient,
-			Text:     m.Text,
-			ClientID: &payload.Client.ID,
-		}
-
-		log.Println("[chatra] -> HandleIncoming start")
-
-		if err := h.svc.HandleIncoming(r.Context(), msg); err != nil {
-			log.Println("[chatra] HandleIncoming error:", err)
-			http.Error(w, "processing error", http.StatusInternalServerError)
-			return
-		}
-
-		log.Println("[chatra] -> HandleIncoming done")
-	}
-
-	log.Println("[chatra] webhook ACK")
-	w.WriteHeader(http.StatusOK)
+	log.Println("[chatra] webhook ACK sent")
 }
