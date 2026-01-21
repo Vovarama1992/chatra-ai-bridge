@@ -10,69 +10,50 @@ import (
 	"time"
 )
 
-const chatraBaseURL = "https://app.chatra.io/api/v1"
-
 type ChatraOutbound struct {
-	token  string
-	client *http.Client
+	baseURL string
+	token   string // PUBLIC:PRIVATE
+	client  *http.Client
 }
 
 func NewChatraOutbound() *ChatraOutbound {
 	token := os.Getenv("CHATRA_API_TOKEN")
 	if token == "" {
-		panic("CHATRA_API_TOKEN not set")
+		panic("CHATRA_API_TOKEN not set (expected PUBLIC:PRIVATE)")
 	}
 
 	return &ChatraOutbound{
-		token:  token,
-		client: &http.Client{Timeout: 10 * time.Second},
+		baseURL: "https://app.chatra.io/api",
+		token:   token,
+		client:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// Отправка сообщения клиенту (видит клиент)
-func (c *ChatraOutbound) SendToChat(
-	ctx context.Context,
-	chatID string,
-	text string,
-) error {
-	return c.send(ctx, "/chats/"+chatID+"/messages", map[string]any{
-		"text": text,
+// Отправка сообщения клиенту (рекомендовано для автоматизации)
+func (c *ChatraOutbound) SendToChat(ctx context.Context, clientID string, text string) error {
+	return c.send(ctx, "/pushedMessages", map[string]any{
+		"clientId": clientID,
+		"text":     text,
 	})
 }
 
-// Отправка internal note (видят только операторы)
-func (c *ChatraOutbound) SendNote(
-	ctx context.Context,
-	chatID string,
-	text string,
-) error {
-	return c.send(ctx, "/chats/"+chatID+"/notes", map[string]any{
-		"text": text,
-	})
+// Internal note в REST API Chatra нет (по крайней мере в этой доке).
+func (c *ChatraOutbound) SendNote(ctx context.Context, _ string, _ string) error {
+	return errors.New("chatra: notes endpoint is not supported by REST API; use pushedMessages/messages")
 }
 
-func (c *ChatraOutbound) send(
-	ctx context.Context,
-	path string,
-	body any,
-) error {
+func (c *ChatraOutbound) send(ctx context.Context, path string, body any) error {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		chatraBaseURL+path,
-		bytes.NewReader(b),
-	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
 
-	// ВАЖНО: Chatra ждёт именно этот хедер
-	req.Header.Set("X-Chatra-Access-Token", c.token)
+	req.Header.Set("Authorization", "Chatra.Simple "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req)
@@ -84,6 +65,5 @@ func (c *ChatraOutbound) send(
 	if resp.StatusCode >= 300 {
 		return errors.New("chatra api error: " + resp.Status)
 	}
-
 	return nil
 }

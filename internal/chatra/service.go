@@ -103,7 +103,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 				"confidence=" + formatFloat(resp.Confidence) + "\n\n" +
 				resp.Answer
 
-		return s.outbound.SendNote(ctx, msg.ChatID, note)
+		return s.outbound.SendNote(ctx, *&msg.ChatID, note)
 	}
 
 	// 7) сохраняем AI
@@ -117,7 +117,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	}
 
 	// 8) отправляем в Chatra
-	return s.outbound.SendToChat(ctx, msg.ChatID, resp.Answer)
+	return s.outbound.SendToChat(ctx, *&msg.ChatID, resp.Answer)
 }
 
 // локально, чтобы не тащить fmt в hot path
