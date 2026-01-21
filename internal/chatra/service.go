@@ -32,17 +32,24 @@ type aiResponse struct {
 }
 
 func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
-	log.Printf("[svc] incoming chatId=%s text=%q\n", msg.ChatID, msg.Text)
+	log.Printf("[svc] incoming chatId=%s text=%q", msg.ChatID, msg.Text)
 
+	// 1) СОХРАНЯЕМ сообщение клиента СРАЗУ
+	if err := s.repo.SaveMessage(ctx, msg); err != nil {
+		log.Println("[svc] SaveMessage(client) error:", err)
+		return err
+	}
+
+	// 2) грузим историю
 	log.Println("[svc] load history")
 	history, err := s.repo.GetHistory(ctx, msg.ChatID)
 	if err != nil {
 		log.Println("[svc] GetHistory error:", err)
 		return err
 	}
-	log.Printf("[svc] history loaded: %d messages\n", len(history))
+	log.Printf("[svc] history loaded: %d messages", len(history))
 
-	log.Println("[svc] build AI context")
+	// 3) контекст GPT
 	aiHistory := []ai.Message{
 		{
 			Role: "system",
@@ -66,36 +73,31 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		Text: msg.Text,
 	})
 
-	log.Printf("[svc] AI context size=%d\n", len(aiHistory))
+	log.Printf("[svc] AI context size=%d", len(aiHistory))
 
-	ctxAI, cancel := context.WithTimeout(ctx, 60*time.Second)
+	// 4) GPT
+	ctxAI, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	log.Println("[svc] call GPT")
 	raw, err := s.ai.GetReply(ctxAI, aiHistory)
 	if err != nil {
 		log.Println("[svc] GPT error:", err)
 		return err
 	}
-	log.Println("[svc] GPT reply received")
 
+	log.Println("[svc] GPT reply raw:", raw)
+
+	// 5) JSON parse
 	var resp aiResponse
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		log.Println("[svc] AI unmarshal error:", err)
 		return errors.New("invalid AI response format")
 	}
 
-	log.Printf("[svc] AI confidence=%.3f\n", resp.Confidence)
+	log.Printf("[svc] AI confidence=%.2f", resp.Confidence)
 
-	log.Println("[svc] save client message")
-	if err := s.repo.SaveMessage(ctx, msg); err != nil {
-		log.Println("[svc] SaveMessage(client) error:", err)
-		return err
-	}
-
+	// 6) low confidence
 	if resp.Confidence < confidenceThreshold {
-		log.Println("[svc] low confidence -> send note")
-
 		note :=
 			"[AI, low confidence]\n" +
 				"confidence=" + formatFloat(resp.Confidence) + "\n\n" +
@@ -104,7 +106,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return s.outbound.SendNote(ctx, msg.ChatID, note)
 	}
 
-	log.Println("[svc] save AI message")
+	// 7) сохраняем AI
 	if err := s.repo.SaveMessage(ctx, &Message{
 		ChatID: msg.ChatID,
 		Sender: SenderAI,
@@ -114,7 +116,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return err
 	}
 
-	log.Println("[svc] send message to Chatra")
+	// 8) отправляем в Chatra
 	return s.outbound.SendToChat(ctx, msg.ChatID, resp.Answer)
 }
 

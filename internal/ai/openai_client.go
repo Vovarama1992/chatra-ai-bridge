@@ -35,7 +35,16 @@ func (c *OpenAIClient) GetReply(
 	history []Message,
 ) (string, error) {
 
-	msgs := make([]openai.ChatCompletionMessage, 0, len(history))
+	// ЖЁСТКИЙ форматный guard — ПОСЛЕДНИМ system
+	const jsonGuard = `
+Отвечай ТОЛЬКО валидным JSON.
+Никакого текста вне JSON.
+Формат строго:
+{"answer":"строка","confidence":0.0}
+Если нарушишь формат — ответ будет отброшен.
+`
+
+	msgs := make([]openai.ChatCompletionMessage, 0, len(history)+1)
 
 	for _, m := range history {
 		msgs = append(msgs, openai.ChatCompletionMessage{
@@ -44,17 +53,32 @@ func (c *OpenAIClient) GetReply(
 		})
 	}
 
+	// форматный guard — последним system
+	msgs = append(msgs, openai.ChatCompletionMessage{
+		Role:    "system",
+		Content: jsonGuard,
+	})
+
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:    c.model,
 		Messages: msgs,
 	})
 	if err != nil {
+		log.Println("[ai] OpenAI error:", err)
 		return "", err
 	}
 
 	if len(resp.Choices) == 0 {
+		log.Println("[ai] empty choices")
 		return "", nil
 	}
 
-	return resp.Choices[0].Message.Content, nil
+	raw := resp.Choices[0].Message.Content
+
+	// 🔥 КЛЮЧЕВОЕ ЛОГИРОВАНИЕ
+	log.Println("[ai] RAW GPT RESPONSE >>>")
+	log.Println(raw)
+	log.Println("<<< END GPT RESPONSE")
+
+	return raw, nil
 }
