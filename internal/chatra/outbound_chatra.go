@@ -14,38 +14,62 @@ import (
 )
 
 type ChatraOutbound struct {
-	baseURL string
-	token   string // PUBLIC:PRIVATE
-	client  *http.Client
+	baseURL   string
+	publicKey string
+	secretKey string
+	client    *http.Client
 }
 
 func NewChatraOutbound() *ChatraOutbound {
-	token := strings.TrimSpace(os.Getenv("CHATRA_API_TOKEN"))
-	if token == "" {
-		panic("CHATRA_API_TOKEN not set (expected PUBLIC:PRIVATE)")
+	secret := strings.TrimSpace(os.Getenv("CHATRA_API_TOKEN"))
+	if secret == "" {
+		panic("CHATRA_API_TOKEN not set (expected SECRET key)")
 	}
 
 	return &ChatraOutbound{
-		baseURL: "https://app.chatra.io/api",
-		token:   token,
-		client:  &http.Client{Timeout: 10 * time.Second},
+		baseURL:   "https://app.chatra.io/api",
+		publicKey: "KQN2vdXYigrbe3F36", // PUBLIC key (ChatraID)
+		secretKey: secret,              // SECRET key
+		client:    &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// Отправка сообщения клиенту (рекомендовано для автоматизации)
-func (c *ChatraOutbound) SendToChat(ctx context.Context, clientID string, text string) error {
-	return c.send(ctx, "/pushedMessages", map[string]any{
-		"clientId": clientID,
-		"text":     text,
-	})
+// ---------- PUBLIC API ----------
+
+// Отправка сообщения клиенту (видит клиент)
+func (c *ChatraOutbound) SendToChat(ctx context.Context, clientID, text string) error {
+	return c.send(
+		ctx,
+		http.MethodPost,
+		"/pushedMessages",
+		map[string]any{
+			"clientId": clientID,
+			"text":     text,
+		},
+	)
 }
 
-// Internal note в REST API Chatra нет (по крайней мере в этой доке).
-func (c *ChatraOutbound) SendNote(ctx context.Context, _ string, _ string) error {
-	return errors.New("chatra: notes endpoint is not supported by REST API; use pushedMessages/messages")
+// SendNote — заметка для оператора (client info panel), клиент НЕ видит
+// Реально поддержано Chatra через PUT /clients/:id → notes
+func (c *ChatraOutbound) SendNote(ctx context.Context, clientID, text string) error {
+	return c.send(
+		ctx,
+		http.MethodPut,
+		"/clients/"+clientID,
+		map[string]any{
+			"notes": text,
+		},
+	)
 }
 
-func (c *ChatraOutbound) send(ctx context.Context, path string, body any) error {
+// ---------- INTERNAL ----------
+
+func (c *ChatraOutbound) send(
+	ctx context.Context,
+	method string,
+	path string,
+	body any,
+) error {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -53,7 +77,7 @@ func (c *ChatraOutbound) send(ctx context.Context, path string, body any) error 
 
 	req, err := http.NewRequestWithContext(
 		ctx,
-		http.MethodPost,
+		method,
 		c.baseURL+path,
 		bytes.NewReader(b),
 	)
@@ -61,10 +85,13 @@ func (c *ChatraOutbound) send(ctx context.Context, path string, body any) error 
 		return err
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Chatra.Simple "+c.token)
+	auth := "Chatra.Simple " + c.publicKey + ":" + c.secretKey
 
-	log.Println("[chatra] AUTH =", req.Header.Get("Authorization"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", auth)
+
+	log.Println("[chatra] METHOD =", method)
+	log.Println("[chatra] URL    =", c.baseURL+path)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
