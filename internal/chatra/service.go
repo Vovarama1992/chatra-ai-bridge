@@ -10,7 +10,7 @@ import (
 	"github.com/Vovarama1992/chatra-ai-bridge/internal/ai"
 )
 
-const confidenceThreshold = 0.7
+const confidenceThreshold = 2
 
 type service struct {
 	repo     Repo
