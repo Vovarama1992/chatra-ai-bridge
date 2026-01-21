@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -63,7 +64,13 @@ func (c *ChatraOutbound) send(ctx context.Context, path string, body any) error 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return errors.New("chatra api error: " + resp.Status)
+		respBody, _ := io.ReadAll(resp.Body)
+		return errors.New(
+			"chatra api error: " +
+				resp.Status +
+				" body=" + string(respBody),
+		)
 	}
+
 	return nil
 }
