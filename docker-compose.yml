@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   db:
     image: postgres:17
@@ -24,10 +26,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       PORT: ${PORT:-8080}
       DATABASE_URL: ${DATABASE_URL}
-      # later:
       CHATRA_API_BASE_URL: ${CHATRA_API_BASE_URL:-}
       CHATRA_API_TOKEN: ${CHATRA_API_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
