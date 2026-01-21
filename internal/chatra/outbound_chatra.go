@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -18,7 +20,7 @@ type ChatraOutbound struct {
 }
 
 func NewChatraOutbound() *ChatraOutbound {
-	token := os.Getenv("CHATRA_API_TOKEN")
+	token := strings.TrimSpace(os.Getenv("CHATRA_API_TOKEN"))
 	if token == "" {
 		panic("CHATRA_API_TOKEN not set (expected PUBLIC:PRIVATE)")
 	}
@@ -49,13 +51,20 @@ func (c *ChatraOutbound) send(ctx context.Context, path string, body any) error 
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.baseURL+path,
+		bytes.NewReader(b),
+	)
 	if err != nil {
 		return err
 	}
 
-	req.Header.Set("Authorization", "Chatra.Simple "+c.token)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Chatra.Simple "+c.token)
+
+	log.Println("[chatra] AUTH =", req.Header.Get("Authorization"))
 
 	resp, err := c.client.Do(req)
 	if err != nil {
