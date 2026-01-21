@@ -10,23 +10,22 @@ import (
 	"time"
 )
 
+const chatraBaseURL = "https://app.chatra.io/api/v1"
+
 type ChatraOutbound struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	token  string
+	client *http.Client
 }
 
 func NewChatraOutbound() *ChatraOutbound {
-	base := os.Getenv("CHATRA_API_BASE_URL")
 	token := os.Getenv("CHATRA_API_TOKEN")
-	if base == "" || token == "" {
-		panic("CHATRA_API_BASE_URL or CHATRA_API_TOKEN not set")
+	if token == "" {
+		panic("CHATRA_API_TOKEN not set")
 	}
 
 	return &ChatraOutbound{
-		baseURL: base,
-		token:   token,
-		client:  &http.Client{Timeout: 10 * time.Second},
+		token:  token,
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -65,14 +64,15 @@ func (c *ChatraOutbound) send(
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		c.baseURL+path,
+		chatraBaseURL+path,
 		bytes.NewReader(b),
 	)
 	if err != nil {
 		return err
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	// ВАЖНО: Chatra ждёт именно этот хедер
+	req.Header.Set("X-Chatra-Access-Token", c.token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req)
