@@ -1,8 +1,10 @@
 package chatra
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 )
@@ -17,6 +19,17 @@ func NewHandler(svc Service) *Handler {
 
 func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	log.Println("[chatra] webhook hit")
+
+	log.Println("[chatra HEADERS]")
+	for k, v := range r.Header {
+		log.Printf("%s: %v\n", k, v)
+	}
+
+	body, _ := io.ReadAll(r.Body)
+	log.Printf("[chatra RAW BODY]\n%s\n", body)
+
+	// вернуть body обратно для Decode
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	var payload struct {
 		EventName string `json:"eventName"`
