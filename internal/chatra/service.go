@@ -50,10 +50,22 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	log.Printf("[svc] history loaded: %d messages", len(history))
 
 	// 3) контекст GPT
+	techCtx := ""
+
+	if len(msg.ClientIntegration) > 0 {
+		b, _ := json.Marshal(msg.ClientIntegration)
+		techCtx += "\n[CLIENT INTEGRATION DATA]\n" + string(b)
+	}
+
+	if len(msg.ClientInfo) > 0 {
+		b, _ := json.Marshal(msg.ClientInfo)
+		techCtx += "\n[CLIENT INFO]\n" + string(b)
+	}
+
 	aiHistory := []ai.Message{
 		{
 			Role: "system",
-			Text: BaseSystemPrompt + "\n\n" + NotVPNDomainPrompt,
+			Text: BaseSystemPrompt + "\n\n" + NotVPNDomainPrompt + techCtx,
 		},
 	}
 

@@ -18,8 +18,10 @@ type Message struct {
 	ClientID    *string
 	SupporterID *string
 	CreatedAt   int64
-}
 
+	ClientInfo        map[string]any
+	ClientIntegration map[string]any
+}
 type Outbound interface {
 	SendToChat(ctx context.Context, chatID string, text string) error
 	SendNote(ctx context.Context, chatID string, text string) error
