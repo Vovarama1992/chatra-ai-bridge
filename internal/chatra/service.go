@@ -111,8 +111,8 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	// 6) low confidence
 	if resp.Confidence < confidenceThreshold {
 		note :=
-			"[AI, low confidence]\n" +
-				"confidence=" + formatFloat(resp.Confidence) + "\n\n" +
+			"[AI]\n" +
+				"confidence: " + formatFloat(resp.Confidence) + "\n\n" +
 				resp.Answer
 
 		return s.outbound.SendNote(ctx, *msg.ClientID, note)
