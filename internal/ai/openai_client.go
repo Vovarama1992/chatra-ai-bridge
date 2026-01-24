@@ -32,10 +32,13 @@ func NewOpenAIClient() *OpenAIClient {
 
 func (c *OpenAIClient) GetReply(
 	ctx context.Context,
+	domainPrompt string,
+	clientInfo string,
+	integrationData string,
 	history []Message,
+	lastUserMessage string,
 ) (string, error) {
 
-	// ЖЁСТКИЙ форматный guard — ПОСЛЕДНИМ system
 	const jsonGuard = `
 Отвечай ТОЛЬКО валидным JSON.
 Никакого текста вне JSON.
@@ -44,8 +47,31 @@ func (c *OpenAIClient) GetReply(
 Если нарушишь формат — ответ будет отброшен.
 `
 
-	msgs := make([]openai.ChatCompletionMessage, 0, len(history)+1)
+	msgs := make([]openai.ChatCompletionMessage, 0)
 
+	// 1) Доменный промпт
+	msgs = append(msgs, openai.ChatCompletionMessage{
+		Role:    "system",
+		Content: domainPrompt,
+	})
+
+	// 2) CLIENT INFO — факты устройства
+	if clientInfo != "" {
+		msgs = append(msgs, openai.ChatCompletionMessage{
+			Role:    "system",
+			Content: "[CLIENT INFO]\n" + clientInfo,
+		})
+	}
+
+	// 3) CLIENT INTEGRATION DATA — факты из Chatra/CRM
+	if integrationData != "" {
+		msgs = append(msgs, openai.ChatCompletionMessage{
+			Role:    "system",
+			Content: "[CLIENT INTEGRATION DATA]\n" + integrationData,
+		})
+	}
+
+	// 4) История диалога
 	for _, m := range history {
 		msgs = append(msgs, openai.ChatCompletionMessage{
 			Role:    m.Role,
@@ -53,7 +79,13 @@ func (c *OpenAIClient) GetReply(
 		})
 	}
 
-	// форматный guard — последним system
+	// 5) Последнее сообщение пользователя
+	msgs = append(msgs, openai.ChatCompletionMessage{
+		Role:    "user",
+		Content: lastUserMessage,
+	})
+
+	// 6) JSON guard
 	msgs = append(msgs, openai.ChatCompletionMessage{
 		Role:    "system",
 		Content: jsonGuard,
@@ -75,7 +107,6 @@ func (c *OpenAIClient) GetReply(
 
 	raw := resp.Choices[0].Message.Content
 
-	// 🔥 КЛЮЧЕВОЕ ЛОГИРОВАНИЕ
 	log.Println("[ai] RAW GPT RESPONSE >>>")
 	log.Println(raw)
 	log.Println("<<< END GPT RESPONSE")

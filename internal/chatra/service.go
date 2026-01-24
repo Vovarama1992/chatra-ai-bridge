@@ -49,26 +49,24 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	}
 	log.Printf("[svc] history loaded: %d messages", len(history))
 
-	// 3) контекст GPT
-	techCtx := ""
+	// 3) Готовим сегменты для GPT
 
-	if len(msg.ClientIntegration) > 0 {
-		b, _ := json.Marshal(msg.ClientIntegration)
-		techCtx += "\n[CLIENT INTEGRATION DATA]\n" + string(b)
-	}
+	domainPrompt := BaseSystemPrompt + "\n\n" + NotVPNDomainPrompt
 
+	var clientInfo string
 	if len(msg.ClientInfo) > 0 {
 		b, _ := json.Marshal(msg.ClientInfo)
-		techCtx += "\n[CLIENT INFO]\n" + string(b)
+		clientInfo = string(b)
 	}
 
-	aiHistory := []ai.Message{
-		{
-			Role: "system",
-			Text: BaseSystemPrompt + "\n\n" + NotVPNDomainPrompt + techCtx,
-		},
+	var integrationData string
+	if len(msg.ClientIntegration) > 0 {
+		b, _ := json.Marshal(msg.ClientIntegration)
+		integrationData = string(b)
 	}
 
+	// История в роли user/assistant БЕЗ system
+	aiHistory := make([]ai.Message, 0, len(history))
 	for _, m := range history {
 		role := "user"
 		if m.Sender == SenderAI || m.Sender == SenderSupporter {
@@ -80,24 +78,24 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		})
 	}
 
-	aiHistory = append(aiHistory, ai.Message{
-		Role: "user",
-		Text: msg.Text,
-	})
-
-	log.Printf("[svc] AI context size=%d", len(aiHistory))
+	log.Printf("[svc] history for AI: %d messages", len(aiHistory))
 
 	// 4) GPT
 	ctxAI, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	raw, err := s.ai.GetReply(ctxAI, aiHistory)
+	raw, err := s.ai.GetReply(
+		ctxAI,
+		domainPrompt,
+		clientInfo,
+		integrationData,
+		aiHistory,
+		msg.Text,
+	)
 	if err != nil {
 		log.Println("[svc] GPT error:", err)
 		return err
 	}
-
-	log.Println("[svc] GPT reply raw:", raw)
 
 	// 5) JSON parse
 	var resp aiResponse
