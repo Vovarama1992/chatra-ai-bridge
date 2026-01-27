@@ -51,8 +51,9 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	}
 	log.Printf("[svc] history loaded: %d messages", len(history))
 
-	// 3) Готовим сегменты для GPT
-	domainPrompt := BaseSystemPrompt + "\n\n" + NotVPNDomainPrompt
+	// 3) готовим base + cases отдельно
+	basePrompt := BaseSystemPrompt
+	domainCases := NotVPNDomainPrompt
 
 	var clientInfo string
 	if len(msg.ClientInfo) > 0 {
@@ -78,7 +79,6 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 			Text: m.Text,
 		})
 	}
-
 	log.Printf("[svc] history for AI: %d messages", len(aiHistory))
 
 	// 4) GPT
@@ -87,7 +87,8 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 
 	raw, err := s.ai.GetReply(
 		ctxAI,
-		domainPrompt,
+		basePrompt,
+		domainCases,
 		clientInfo,
 		integrationData,
 		aiHistory,
@@ -135,7 +136,6 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	// 8) отправляем в Chatra (видит клиент)
 	return s.outbound.SendToChat(ctx, *msg.ClientID, resp.Answer)
 }
-
 func formatFloat(v float64) string {
 	return strconv.FormatFloat(v, 'f', 2, 64)
 }

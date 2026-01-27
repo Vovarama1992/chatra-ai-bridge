@@ -32,7 +32,8 @@ func NewOpenAIClient() *OpenAIClient {
 
 func (c *OpenAIClient) GetReply(
 	ctx context.Context,
-	domainPrompt string,
+	basePrompt string,
+	domainCases string,
 	clientInfo string,
 	integrationData string,
 	history []Message,
@@ -43,19 +44,25 @@ func (c *OpenAIClient) GetReply(
 Отвечай ТОЛЬКО валидным JSON.
 Никакого текста вне JSON.
 Формат строго:
-{"answer":"строка","confidence":0.0}
+{"answer":"строка","confidence":0.0,"reason":"строка"}
 Если нарушишь формат — ответ будет отброшен.
 `
 
 	msgs := make([]openai.ChatCompletionMessage, 0)
 
-	// 1) Доменный промпт
+	// 1) SYSTEM — как работать
 	msgs = append(msgs, openai.ChatCompletionMessage{
 		Role:    "system",
-		Content: domainPrompt,
+		Content: basePrompt,
 	})
 
-	// 2) CLIENT INFO — факты устройства
+	// 2) USER — база кейсов (DOMAIN CASES)
+	msgs = append(msgs, openai.ChatCompletionMessage{
+		Role:    "user",
+		Content: domainCases,
+	})
+
+	// 3) CLIENT INFO
 	if clientInfo != "" {
 		msgs = append(msgs, openai.ChatCompletionMessage{
 			Role:    "system",
@@ -63,7 +70,7 @@ func (c *OpenAIClient) GetReply(
 		})
 	}
 
-	// 3) CLIENT INTEGRATION DATA — факты из Chatra/CRM
+	// 4) CLIENT INTEGRATION DATA
 	if integrationData != "" {
 		msgs = append(msgs, openai.ChatCompletionMessage{
 			Role:    "system",
@@ -71,7 +78,7 @@ func (c *OpenAIClient) GetReply(
 		})
 	}
 
-	// 4) История диалога
+	// 5) История
 	for _, m := range history {
 		msgs = append(msgs, openai.ChatCompletionMessage{
 			Role:    m.Role,
@@ -79,13 +86,13 @@ func (c *OpenAIClient) GetReply(
 		})
 	}
 
-	// 5) Последнее сообщение пользователя
+	// 6) Последнее сообщение — главный сигнал
 	msgs = append(msgs, openai.ChatCompletionMessage{
 		Role:    "user",
 		Content: lastUserMessage,
 	})
 
-	// 6) JSON guard
+	// 7) JSON guard в конце
 	msgs = append(msgs, openai.ChatCompletionMessage{
 		Role:    "system",
 		Content: jsonGuard,

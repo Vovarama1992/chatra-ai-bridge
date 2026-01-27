@@ -6,7 +6,8 @@ import "context"
 type AI interface {
 	GetReply(
 		ctx context.Context,
-		domainPrompt string,
+		basePrompt string,
+		domainCases string,
 		clientInfo string,
 		integrationData string,
 		history []Message,
