@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/Vovarama1992/chatra-ai-bridge/internal/ai"
 )
 
-const confidenceThreshold = 2
+const confidenceThreshold = 1.3
 
 type service struct {
 	repo     Repo
@@ -29,6 +30,7 @@ func NewService(repo Repo, aiClient ai.AI, outbound Outbound) Service {
 type aiResponse struct {
 	Answer     string  `json:"answer"`
 	Confidence float64 `json:"confidence"`
+	Reason     string  `json:"reason"`
 }
 
 func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
@@ -50,7 +52,6 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	log.Printf("[svc] history loaded: %d messages", len(history))
 
 	// 3) Готовим сегменты для GPT
-
 	domainPrompt := BaseSystemPrompt + "\n\n" + NotVPNDomainPrompt
 
 	var clientInfo string
@@ -97,6 +98,8 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return err
 	}
 
+	log.Printf("[svc] AI raw=%s", raw)
+
 	// 5) JSON parse
 	var resp aiResponse
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
@@ -104,13 +107,16 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return errors.New("invalid AI response format")
 	}
 
+	log.Printf("[svc] AI answer=%q", resp.Answer)
 	log.Printf("[svc] AI confidence=%.2f", resp.Confidence)
+	log.Printf("[svc] AI reason=%q", resp.Reason)
 
-	// 6) low confidence
+	// 6) low confidence -> note for operator
 	if resp.Confidence < confidenceThreshold {
 		note :=
 			"[AI]\n" +
-				"confidence: " + formatFloat(resp.Confidence) + "\n\n" +
+				"confidence: " + formatFloat(resp.Confidence) + "\n" +
+				"reason: " + resp.Reason + "\n\n" +
 				resp.Answer
 
 		return s.outbound.SendNote(ctx, *msg.ClientID, note)
@@ -126,18 +132,10 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return err
 	}
 
-	// 8) отправляем в Chatra
+	// 8) отправляем в Chatra (видит клиент)
 	return s.outbound.SendToChat(ctx, *msg.ClientID, resp.Answer)
 }
 
-// локально, чтобы не тащить fmt в hot path
 func formatFloat(v float64) string {
-	switch {
-	case v >= 1:
-		return "1.0"
-	case v <= 0:
-		return "0.0"
-	default:
-		return string([]byte{'0' + byte(v*10)})
-	}
+	return strconv.FormatFloat(v, 'f', 2, 64)
 }
