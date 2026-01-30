@@ -36,4 +36,5 @@ type Repo interface {
 // Service — оркестрация (без return)
 type Service interface {
 	HandleIncoming(ctx context.Context, msg *Message) error
+	SaveOnly(ctx context.Context, msg *Message) error
 }

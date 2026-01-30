@@ -136,6 +136,14 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	// 8) отправляем в Chatra (видит клиент)
 	return s.outbound.SendToChat(ctx, *msg.ClientID, resp.Answer)
 }
+
+func (s *service) SaveOnly(ctx context.Context, msg *Message) error {
+	log.Printf("[svc] save only chatId=%s sender=%s text=%q",
+		msg.ChatID, msg.Sender, msg.Text,
+	)
+	return s.repo.SaveMessage(ctx, msg)
+}
+
 func formatFloat(v float64) string {
 	return strconv.FormatFloat(v, 'f', 2, 64)
 }

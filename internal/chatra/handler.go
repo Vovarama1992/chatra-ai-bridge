@@ -71,33 +71,51 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	p := payload
 
 	// ВСЯ ОБРАБОТКА — В ФОНЕ
+	// ВСЯ ОБРАБОТКА — В ФОНЕ
 	go func() {
 		ctx := context.Background()
 
 		for i, m := range p.Messages {
 			log.Printf("[chatra] msg[%d] type=%s text=%q", i, m.Type, m.Text)
 
-			if m.Type != "client" || m.Text == "" {
+			if m.Text == "" {
 				continue
 			}
 
-			msg := &Message{
-				ChatID:            p.Client.ChatID,
-				Sender:            SenderClient,
-				Text:              m.Text,
-				ClientID:          &p.Client.ID,
-				ClientInfo:        p.Client.Info,
-				ClientIntegration: p.Client.Int,
-			}
+			switch m.Type {
 
-			log.Println("[chatra] -> HandleIncoming start")
+			case "client":
+				msg := &Message{
+					ChatID:            p.Client.ChatID,
+					Sender:            SenderClient,
+					Text:              m.Text,
+					ClientID:          &p.Client.ID,
+					ClientInfo:        p.Client.Info,
+					ClientIntegration: p.Client.Int,
+				}
 
-			if err := h.svc.HandleIncoming(ctx, msg); err != nil {
-				log.Println("[chatra] HandleIncoming error:", err)
+				log.Println("[chatra] -> HandleIncoming start")
+
+				if err := h.svc.HandleIncoming(ctx, msg); err != nil {
+					log.Println("[chatra] HandleIncoming error:", err)
+				}
+
+				log.Println("[chatra] -> HandleIncoming done")
+
+			case "agent":
+				if err := h.svc.SaveOnly(ctx, &Message{
+					ChatID:   p.Client.ChatID,
+					Sender:   SenderSupporter,
+					Text:     m.Text,
+					ClientID: &p.Client.ID,
+				}); err != nil {
+					log.Println("[chatra] Save agent message error:", err)
+				}
+
+			case "system":
+				// игнорируем системные сообщения
 				continue
 			}
-
-			log.Println("[chatra] -> HandleIncoming done")
 		}
 	}()
 
