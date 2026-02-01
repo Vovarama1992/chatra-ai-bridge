@@ -85,6 +85,43 @@ const BaseSystemPrompt = `
 г) данных из CLIENT INFO, CLIENT INTEGRATION DATA и CASE_* недостаточно — требуется уточнение у пользователя или добавление нового кейса
 `
 
+const ClientInfoOnlyPrompt = `
+У тебя есть:
+
+1) История диалога пользователя с поддержкой
+2) Последнее сообщение пользователя
+3) CLIENT INFO
+4) CLIENT INTEGRATION DATA
+
+Твоя задача — понять, можно ли полностью и однозначно ответить
+на последний вопрос пользователя, опираясь ТОЛЬКО на CLIENT INFO
+и CLIENT INTEGRATION DATA с учётом контекста из истории.
+
+Ничего не выдумывать.
+Ничего не предполагать.
+Никакой общей диагностики.
+
+Разрешено использовать только факты, которые явно есть в CLIENT INFO
+и CLIENT INTEGRATION DATA, и базовые логические принципы,
+в которых ты уверен на 100%.
+
+Если этих данных достаточно — верни:
+
+{
+  "answer": "готовый ответ пользователю",
+  "confidence": 1.0,
+  "reason": "client data enough"
+}
+
+Если недостаточно — верни строго:
+
+{
+  "answer": "",
+  "confidence": 0.0,
+  "reason": "insufficient client data"
+}
+`
+
 const NotVPNDomainPrompt = `
 CASE_01_VPN_NOT_STARTS:
 

@@ -81,6 +81,23 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	}
 	log.Printf("[svc] history for AI: %d messages", len(aiHistory))
 
+	respCI, err := s.checkClientInfo(
+		ctx,
+		aiHistory,
+		msg.Text,
+		clientInfo,
+		integrationData,
+	)
+
+	if err == nil && respCI.Confidence == 1.0 {
+		_ = s.repo.SaveMessage(ctx, &Message{
+			ChatID: msg.ChatID,
+			Sender: SenderAI,
+			Text:   respCI.Answer,
+		})
+		return s.outbound.SendToChat(ctx, *msg.ClientID, respCI.Answer)
+	}
+
 	// 4) GPT
 	ctxAI, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -142,6 +159,35 @@ func (s *service) SaveOnly(ctx context.Context, msg *Message) error {
 		msg.ChatID, msg.Sender, msg.Text,
 	)
 	return s.repo.SaveMessage(ctx, msg)
+}
+
+func (s *service) checkClientInfo(
+	ctx context.Context,
+	history []ai.Message,
+	lastUserText string,
+	clientInfo string,
+	integrationData string,
+) (aiResponse, error) {
+
+	raw, err := s.ai.GetReply(
+		ctx,
+		ClientInfoOnlyPrompt,
+		"", // без кейсов
+		clientInfo,
+		integrationData,
+		history, // ВАЖНО
+		lastUserText,
+	)
+	if err != nil {
+		return aiResponse{}, err
+	}
+
+	var resp aiResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return aiResponse{}, err
+	}
+
+	return resp, nil
 }
 
 func formatFloat(v float64) string {
