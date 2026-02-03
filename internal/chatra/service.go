@@ -11,7 +11,10 @@ import (
 	"github.com/Vovarama1992/chatra-ai-bridge/internal/ai"
 )
 
-const confidenceThreshold = 1.3
+var allowedModes = map[string]bool{
+	// "CLIENT_ONLY": true,
+	// "CASES_USED":  true,
+}
 
 type service struct {
 	repo     Repo
@@ -28,9 +31,9 @@ func NewService(repo Repo, aiClient ai.AI, outbound Outbound) Service {
 }
 
 type aiResponse struct {
-	Answer     string  `json:"answer"`
-	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"reason"`
+	Answer string `json:"answer"`
+	Mode   string `json:"mode"`
+	Reason string `json:"reason"`
 }
 
 func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
@@ -88,8 +91,9 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		clientInfo,
 		integrationData,
 	)
-
-	if err == nil && respCI.Confidence == 1.0 {
+	if err != nil {
+		log.Println("[svc] checkClientInfo error:", err)
+	} else if respCI.Mode == "CLIENT_ONLY" {
 		_ = s.repo.SaveMessage(ctx, &Message{
 			ChatID: msg.ChatID,
 			Sender: SenderAI,
@@ -118,7 +122,6 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 
 	log.Printf("[svc] AI raw=%s", raw)
 
-	// 5) JSON parse
 	var resp aiResponse
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		log.Println("[svc] AI unmarshal error:", err)
@@ -126,14 +129,13 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	}
 
 	log.Printf("[svc] AI answer=%q", resp.Answer)
-	log.Printf("[svc] AI confidence=%.2f", resp.Confidence)
+	log.Printf("[svc] AI mode=%q", resp.Mode)
 	log.Printf("[svc] AI reason=%q", resp.Reason)
 
-	// 6) low confidence -> note for operator
-	if resp.Confidence < confidenceThreshold {
+	if !allowedModes[resp.Mode] {
 		note :=
 			"[AI]\n" +
-				"confidence: " + formatFloat(resp.Confidence) + "\n" +
+				"mode: " + resp.Mode + "\n" +
 				"reason: " + resp.Reason + "\n\n" +
 				resp.Answer
 
