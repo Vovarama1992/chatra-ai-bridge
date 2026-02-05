@@ -63,8 +63,8 @@ const BaseSystemPrompt = `
 
 КЛЮЧ "mode" (одно из трёх значений):
 
-"CLIENT_ONLY" — ответ построен только на CLIENT INFO и CLIENT INTEGRATION DATA  
-"CASES_USED" — для ответа использовались CASE_*  
+"CLIENT_ONLY" — ответ построен ТОЛЬКО на CLIENT INFO и CLIENT INTEGRATION DATA  
+"CASES_USED" — для ответа пришлось использовать конкретный кейс или кейсы из списка
 "NEED_OPERATOR" — данных недостаточно, требуется оператор
 
 КЛЮЧ "reason":
@@ -109,12 +109,11 @@ const ClientInfoOnlyPrompt = `
 
 Поле "mode":
 — "CLIENT_ONLY" если ответ можно дать только по данным клиента
-— "CASES_USED" если данных недостаточно и нужно переходить к кейсам
+— "CASES_NEEDED" если данных недостаточно и нужно переходить к кейсам
 
 Поле "reason":
 — при CLIENT_ONLY: перечисли конкретные поля из CLIENT INFO / CLIENT INTEGRATION DATA, которые использовал.
-— при CASES_USED: укажи точный CASE_*, на который опирался.
-— при NEED_OPERATOR: перечисли, каких именно данных не хватает для ответа.
+— при CASES_NEEDED: укажи каких данных не хватает
 
 Пример если данных достаточно:
 
@@ -128,7 +127,7 @@ const ClientInfoOnlyPrompt = `
 
 {
   "answer": "",
-  "mode": "CASES_USED",
+  "mode": "CASES_NEEDED",
   "reason": "client data not enough"
 }
 `
