@@ -62,11 +62,12 @@ NEED_OPERATOR
 	})
 
 	// 2) USER — база кейсов (DOMAIN CASES)
-	msgs = append(msgs, openai.ChatCompletionMessage{
-		Role:    "user",
-		Content: domainCases,
-	})
-
+	if domainCases != "" {
+		msgs = append(msgs, openai.ChatCompletionMessage{
+			Role:    "user",
+			Content: domainCases,
+		})
+	}
 	// 3) CLIENT INFO
 	if clientInfo != "" {
 		msgs = append(msgs, openai.ChatCompletionMessage{
