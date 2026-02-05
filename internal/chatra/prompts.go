@@ -67,7 +67,10 @@ const BaseSystemPrompt = `
 "CASES_USED" — для ответа использовались CASE_*  
 "NEED_OPERATOR" — данных недостаточно, требуется оператор
 
-КЛЮЧ "reason" — кратко укажи, на чём основан ответ.
+КЛЮЧ "reason":
+— при CLIENT_ONLY: перечисли конкретные поля из CLIENT INFO / CLIENT INTEGRATION DATA, которые использовал.
+— при CASES_USED: укажи точный CASE_*, на который опирался.
+— при NEED_OPERATOR: перечисли, каких именно данных не хватает для ответа.
 `
 
 const ClientInfoOnlyPrompt = `
@@ -109,7 +112,9 @@ const ClientInfoOnlyPrompt = `
 — "CASES_USED" если данных недостаточно и нужно переходить к кейсам
 
 Поле "reason":
-кратко объясни почему ты выбрал этот mode.
+— при CLIENT_ONLY: перечисли конкретные поля из CLIENT INFO / CLIENT INTEGRATION DATA, которые использовал.
+— при CASES_USED: укажи точный CASE_*, на который опирался.
+— при NEED_OPERATOR: перечисли, каких именно данных не хватает для ответа.
 
 Пример если данных достаточно:
 
