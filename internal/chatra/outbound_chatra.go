@@ -37,7 +37,7 @@ func NewChatraOutbound() *ChatraOutbound {
 // ---------- PUBLIC API ----------
 
 // Отправка сообщения клиенту (видит клиент)
-func (c *ChatraOutbound) SendToChat(ctx context.Context, clientID, text string) error {
+func (c *ChatraOutbound) SendToChhat(ctx context.Context, clientID, text string) error {
 	return c.send(
 		ctx,
 		http.MethodPost,
@@ -47,6 +47,11 @@ func (c *ChatraOutbound) SendToChat(ctx context.Context, clientID, text string) 
 			"text":     text,
 		},
 	)
+}
+
+func (c ChatraOutbound) SendToChat(ctx context.Context, clientID string, text string) error {
+	log.Println("[SAFE MODE] BLOCKED SendToChat:", clientID, text)
+	return nil
 }
 
 // SendNote — заметка для оператора (client info panel), клиент НЕ видит
