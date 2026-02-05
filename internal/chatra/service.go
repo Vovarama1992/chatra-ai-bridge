@@ -37,24 +37,23 @@ type aiResponse struct {
 }
 
 func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
-	log.Printf("[svc] incoming chatId=%s text=%q", msg.ChatID, msg.Text)
+	log.Printf("\n========== NEW MESSAGE ==========")
+	log.Printf("[svc] chatId=%s text=%q", msg.ChatID, msg.Text)
 
-	// 1) СОХРАНЯЕМ сообщение клиента СРАЗУ
+	// 1) save client message
 	if err := s.repo.SaveMessage(ctx, msg); err != nil {
 		log.Println("[svc] SaveMessage(client) error:", err)
 		return err
 	}
 
-	// 2) грузим историю
-	log.Println("[svc] load history")
+	// 2) load history
 	history, err := s.repo.GetHistory(ctx, msg.ChatID)
 	if err != nil {
 		log.Println("[svc] GetHistory error:", err)
 		return err
 	}
-	log.Printf("[svc] history loaded: %d messages", len(history))
 
-	// 3) готовим base + cases отдельно
+	// 3) prepare data
 	basePrompt := BaseSystemPrompt
 	domainCases := NotVPNDomainPrompt
 
@@ -70,7 +69,6 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		integrationData = string(b)
 	}
 
-	// История в роли user/assistant БЕЗ system
 	aiHistory := make([]ai.Message, 0, len(history))
 	for _, m := range history {
 		role := "user"
@@ -82,7 +80,9 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 			Text: m.Text,
 		})
 	}
-	log.Printf("[svc] history for AI: %d messages", len(aiHistory))
+
+	// ===== PHASE 1 — CLIENT INFO ONLY =====
+	log.Println("----- PHASE 1: CLIENT_INFO_ONLY -----")
 
 	respCI, err := s.checkClientInfo(
 		ctx,
@@ -91,9 +91,16 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		clientInfo,
 		integrationData,
 	)
+
 	if err != nil {
-		log.Println("[svc] checkClientInfo error:", err)
-	} else if respCI.Mode == "CLIENT_ONLY" {
+		log.Println("[phase1] error:", err)
+	} else {
+		log.Printf("[phase1] mode=%s reason=%s", respCI.Mode, respCI.Reason)
+	}
+
+	if err == nil && respCI.Mode == "CLIENT_ONLY" {
+		log.Println("[phase1] SUCCESS -> answer from client data")
+
 		_ = s.repo.SaveMessage(ctx, &Message{
 			ChatID: msg.ChatID,
 			Sender: SenderAI,
@@ -102,7 +109,11 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return s.outbound.SendToChat(ctx, *msg.ClientID, respCI.Answer)
 	}
 
-	// 4) GPT
+	log.Println("[phase1] NOT ENOUGH -> switching to CASES")
+
+	// ===== PHASE 2 — CASES =====
+	log.Println("----- PHASE 2: CASES -----")
+
 	ctxAI, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -116,23 +127,21 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		msg.Text,
 	)
 	if err != nil {
-		log.Println("[svc] GPT error:", err)
+		log.Println("[phase2] GPT error:", err)
 		return err
 	}
 
-	log.Printf("[svc] AI raw=%s", raw)
-
 	var resp aiResponse
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
-		log.Println("[svc] AI unmarshal error:", err)
+		log.Println("[phase2] JSON error:", err)
 		return errors.New("invalid AI response format")
 	}
 
-	log.Printf("[svc] AI answer=%q", resp.Answer)
-	log.Printf("[svc] AI mode=%q", resp.Mode)
-	log.Printf("[svc] AI reason=%q", resp.Reason)
+	log.Printf("[phase2] mode=%s reason=%s", resp.Mode, resp.Reason)
 
 	if !allowedModes[resp.Mode] {
+		log.Println("[phase2] BLOCKED -> sending to operator")
+
 		note :=
 			"[AI]\n" +
 				"mode: " + resp.Mode + "\n" +
@@ -142,7 +151,8 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return s.outbound.SendNote(ctx, *msg.ClientID, note)
 	}
 
-	// 7) сохраняем AI
+	log.Println("[phase2] ALLOWED -> sending to client")
+
 	if err := s.repo.SaveMessage(ctx, &Message{
 		ChatID: msg.ChatID,
 		Sender: SenderAI,
@@ -152,15 +162,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		return err
 	}
 
-	// 8) отправляем в Chatra (видит клиент)
 	return s.outbound.SendToChat(ctx, *msg.ClientID, resp.Answer)
-}
-
-func (s *service) SaveOnly(ctx context.Context, msg *Message) error {
-	log.Printf("[svc] save only chatId=%s sender=%s text=%q",
-		msg.ChatID, msg.Sender, msg.Text,
-	)
-	return s.repo.SaveMessage(ctx, msg)
 }
 
 func (s *service) checkClientInfo(
@@ -174,10 +176,10 @@ func (s *service) checkClientInfo(
 	raw, err := s.ai.GetReply(
 		ctx,
 		ClientInfoOnlyPrompt,
-		"", // без кейсов
+		"",
 		clientInfo,
 		integrationData,
-		history, // ВАЖНО
+		history,
 		lastUserText,
 	)
 	if err != nil {
@@ -190,6 +192,13 @@ func (s *service) checkClientInfo(
 	}
 
 	return resp, nil
+}
+
+func (s *service) SaveOnly(ctx context.Context, msg *Message) error {
+	log.Printf("[svc] save only chatId=%s sender=%s text=%q",
+		msg.ChatID, msg.Sender, msg.Text,
+	)
+	return s.repo.SaveMessage(ctx, msg)
 }
 
 func formatFloat(v float64) string {

@@ -44,7 +44,12 @@ func (c *OpenAIClient) GetReply(
 Отвечай ТОЛЬКО валидным JSON.
 Никакого текста вне JSON.
 Формат строго:
-{"answer":"строка","confidence":0.0,"reason":"строка"}
+{"answer":"строка","mode":"строка","reason":"строка"}
+Где mode обязательно одно из:
+CLIENT_ONLY
+CASES_USED
+NEED_OPERATOR
+
 Если нарушишь формат — ответ будет отброшен.
 `
 
