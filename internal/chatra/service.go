@@ -78,6 +78,8 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 			msg.Text,
 			answer,
 			reason,
+			string(clientInfo),
+			string(integrationData),
 		)
 		mode = vRes.Mode
 	}
@@ -111,6 +113,8 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 				msg.Text,
 				answer,
 				reason,
+				string(clientInfo),
+				string(integrationData),
 			)
 			mode = vRes.Mode
 		}
@@ -178,25 +182,27 @@ func (s *service) validateClientOnly(
 	lastUserText string,
 	answer string,
 	reason string,
+	clientInfo string,
+	integrationData string,
 ) (*ValidatorResult, error) {
 
 	raw, err := s.ai.GetValidationReply(
 		ctx,
 		ValidatorClientOnlyPrompt,
-		history, // <-- ai.Message
+		history,
 		lastUserText,
 		answer,
 		reason,
+		clientInfo,
+		integrationData,
+		"", // кейсов нет
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	var res ValidatorResult
-	if err := json.Unmarshal([]byte(raw), &res); err != nil {
-		return nil, err
-	}
-
+	_ = json.Unmarshal([]byte(raw), &res)
 	return &res, nil
 }
 
@@ -206,24 +212,26 @@ func (s *service) validateCases(
 	lastUserText string,
 	answer string,
 	reason string,
+	clientInfo string,
+	integrationData string,
 ) (*ValidatorResult, error) {
 
 	raw, err := s.ai.GetValidationReply(
 		ctx,
 		ValidatorCasesPrompt,
-		history, // <-- ai.Message
+		history,
 		lastUserText,
 		answer,
 		reason,
+		clientInfo,
+		integrationData,
+		NotVPNDomainPrompt, // ← вот это критично
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	var res ValidatorResult
-	if err := json.Unmarshal([]byte(raw), &res); err != nil {
-		return nil, err
-	}
-
+	_ = json.Unmarshal([]byte(raw), &res)
 	return &res, nil
 }

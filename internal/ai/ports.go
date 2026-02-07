@@ -22,6 +22,9 @@ type AI interface {
 		lastUserText string,
 		proposedAnswer string,
 		reason string,
+		clientInfo string,
+		integrationData string,
+		domainCases string, // для client-only передаём ""
 	) (string, error)
 }
 

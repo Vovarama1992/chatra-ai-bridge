@@ -135,31 +135,34 @@ func (c *OpenAIClient) GetValidationReply(
 	lastUserText string,
 	proposedAnswer string,
 	reason string,
+	clientInfo string,
+	integrationData string,
+	domainCases string,
 ) (string, error) {
 
 	input := struct {
-		History        []Message `json:"history"`
-		LastUserText   string    `json:"last_user_text"`
-		ProposedAnswer string    `json:"proposed_answer"`
-		Reason         string    `json:"reason"`
+		History         []Message `json:"history"`
+		LastUserText    string    `json:"last_user_text"`
+		ProposedAnswer  string    `json:"proposed_answer"`
+		Reason          string    `json:"reason"`
+		ClientInfo      string    `json:"client_info"`
+		IntegrationData string    `json:"integration_data"`
+		DomainCases     string    `json:"domain_cases"`
 	}{
-		History:        history,
-		LastUserText:   lastUserText,
-		ProposedAnswer: proposedAnswer,
-		Reason:         reason,
+		History:         history,
+		LastUserText:    lastUserText,
+		ProposedAnswer:  proposedAnswer,
+		Reason:          reason,
+		ClientInfo:      clientInfo,
+		IntegrationData: integrationData,
+		DomainCases:     domainCases,
 	}
 
 	b, _ := json.Marshal(input)
 
 	msgs := []openai.ChatCompletionMessage{
-		{
-			Role:    "system",
-			Content: validationPrompt,
-		},
-		{
-			Role:    "user",
-			Content: string(b),
-		},
+		{Role: "system", Content: validationPrompt},
+		{Role: "user", Content: string(b)},
 	}
 
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
@@ -170,15 +173,5 @@ func (c *OpenAIClient) GetValidationReply(
 		return "", err
 	}
 
-	if len(resp.Choices) == 0 {
-		return "", nil
-	}
-
-	raw := resp.Choices[0].Message.Content
-
-	log.Println("[ai] VALIDATION JSON >>>")
-	log.Println(raw)
-	log.Println("<<< END VALIDATION JSON")
-
-	return raw, nil
+	return resp.Choices[0].Message.Content, nil
 }
