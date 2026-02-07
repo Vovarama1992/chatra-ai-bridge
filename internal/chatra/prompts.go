@@ -79,8 +79,8 @@ const BaseSystemPrompt = `
 даже если CLIENT INFO или CASE_* позволяли составить ответ.
 
 КЛЮЧ "reason":
-— при CLIENT_ONLY: перечисли конкретные поля из CLIENT INFO / CLIENT INTEGRATION DATA, которые использовал.
-— при CASES_USED: укажи точный CASE_*, на который опирался.
+— при CLIENT_ONLY: перечисли конкретные поля из CLIENT INFO / CLIENT INTEGRATION DATA, которые использовал. процитируй информацию, на которой основывался
+— при CASES_USED: укажи точный CASE_*, на который опирался. Процитируй информацию, на которой основывался
 — при NEED_OPERATOR: перечисли, каких именно данных не хватает для ответа.
 `
 
@@ -134,7 +134,7 @@ const ClientInfoOnlyPrompt = `
 ты ОБЯЗАН выбрать mode="CASES_NEEDED".
 
 Поле "reason":
-— при CLIENT_ONLY: перечисли конкретные поля из CLIENT INFO / CLIENT INTEGRATION DATA, которые использовал.
+— при CLIENT_ONLY: перечисли конкретные поля из CLIENT INFO / CLIENT INTEGRATION DATA, которые использовал,процитируй информацию, на которой основывался
 — при CASES_NEEDED: укажи каких данных не хватает
 
 Пример если данных достаточно:
