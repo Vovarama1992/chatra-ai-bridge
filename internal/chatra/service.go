@@ -72,7 +72,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	reason := respCI.Reason
 
 	if mode == "CLIENT_ONLY" {
-		vRes, _ := s.validateCases(
+		vRes, _ := s.validateClientOnly(
 			ctx,
 			aiHistory,
 			msg.Text,
@@ -105,7 +105,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		reason = resp.Reason
 
 		if mode == "CASES_USED" {
-			vRes, _ := s.validateClientOnly(
+			vRes, _ := s.validateCases(
 				ctx,
 				aiHistory,
 				msg.Text,
@@ -180,21 +180,14 @@ func (s *service) validateClientOnly(
 	reason string,
 ) (*ValidatorResult, error) {
 
-	input := struct {
-		History        []ai.Message `json:"history"`
-		LastUserText   string       `json:"last_user_text"`
-		ProposedAnswer string       `json:"proposed_answer"`
-		Reason         string       `json:"reason"`
-	}{
-		History:        history,
-		LastUserText:   lastUserText,
-		ProposedAnswer: answer,
-		Reason:         reason,
-	}
-
-	b, _ := json.Marshal(input)
-
-	raw, err := s.ai.SimpleJSON(ctx, ValidatorClientOnlyPrompt, string(b))
+	raw, err := s.ai.GetValidationReply(
+		ctx,
+		ValidatorClientOnlyPrompt,
+		history,
+		lastUserText,
+		answer,
+		reason,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -215,21 +208,14 @@ func (s *service) validateCases(
 	reason string,
 ) (*ValidatorResult, error) {
 
-	input := struct {
-		History        []ai.Message `json:"history"`
-		LastUserText   string       `json:"last_user_text"`
-		ProposedAnswer string       `json:"proposed_answer"`
-		Reason         string       `json:"reason"`
-	}{
-		History:        history,
-		LastUserText:   lastUserText,
-		ProposedAnswer: answer,
-		Reason:         reason,
-	}
-
-	b, _ := json.Marshal(input)
-
-	raw, err := s.ai.SimpleJSON(ctx, ValidatorCasesPrompt, string(b))
+	raw, err := s.ai.GetValidationReply(
+		ctx,
+		ValidatorCasesPrompt,
+		history,
+		lastUserText,
+		answer,
+		reason,
+	)
 	if err != nil {
 		return nil, err
 	}

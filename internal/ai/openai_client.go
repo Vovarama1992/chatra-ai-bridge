@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 
@@ -127,29 +128,37 @@ NEED_OPERATOR
 	return raw, nil
 }
 
-func (c *OpenAIClient) SimpleJSON(
+func (c *OpenAIClient) GetValidationReply(
 	ctx context.Context,
-	systemPrompt string,
-	userInput string,
+	validationPrompt string,
+	history []Message,
+	lastUserText string,
+	proposedAnswer string,
+	reason string,
 ) (string, error) {
 
-	const jsonGuard = `
-Отвечай ТОЛЬКО валидным JSON.
-Никакого текста вне JSON.
-`
+	input := struct {
+		History        []Message `json:"history"`
+		LastUserText   string    `json:"last_user_text"`
+		ProposedAnswer string    `json:"proposed_answer"`
+		Reason         string    `json:"reason"`
+	}{
+		History:        history,
+		LastUserText:   lastUserText,
+		ProposedAnswer: proposedAnswer,
+		Reason:         reason,
+	}
+
+	b, _ := json.Marshal(input)
 
 	msgs := []openai.ChatCompletionMessage{
 		{
 			Role:    "system",
-			Content: systemPrompt,
+			Content: validationPrompt,
 		},
 		{
 			Role:    "user",
-			Content: userInput,
-		},
-		{
-			Role:    "system",
-			Content: jsonGuard,
+			Content: string(b),
 		},
 	}
 
@@ -167,9 +176,9 @@ func (c *OpenAIClient) SimpleJSON(
 
 	raw := resp.Choices[0].Message.Content
 
-	log.Println("[ai] SIMPLE JSON >>>")
+	log.Println("[ai] VALIDATION JSON >>>")
 	log.Println(raw)
-	log.Println("<<< END SIMPLE JSON")
+	log.Println("<<< END VALIDATION JSON")
 
 	return raw, nil
 }

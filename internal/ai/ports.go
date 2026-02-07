@@ -15,10 +15,13 @@ type AI interface {
 	) (string, error)
 
 	// Простой JSON-вызов для валидаторов
-	SimpleJSON(
+	GetValidationReply(
 		ctx context.Context,
-		systemPrompt string,
-		userInput string,
+		validationPrompt string,
+		history []Message,
+		lastUserText string,
+		proposedAnswer string,
+		reason string,
 	) (string, error)
 }
 
