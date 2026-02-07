@@ -3,10 +3,7 @@ package chatra
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log"
-	"strconv"
-	"time"
 
 	"github.com/Vovarama1992/chatra-ai-bridge/internal/ai"
 )
@@ -40,33 +37,13 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	log.Printf("\n========== NEW MESSAGE ==========")
 	log.Printf("[svc] chatId=%s text=%q", msg.ChatID, msg.Text)
 
-	// 1) save client message
 	if err := s.repo.SaveMessage(ctx, msg); err != nil {
-		log.Println("[svc] SaveMessage(client) error:", err)
 		return err
 	}
 
-	// 2) load history
 	history, err := s.repo.GetHistory(ctx, msg.ChatID)
 	if err != nil {
-		log.Println("[svc] GetHistory error:", err)
 		return err
-	}
-
-	// 3) prepare data
-	basePrompt := BaseSystemPrompt
-	domainCases := NotVPNDomainPrompt
-
-	var clientInfo string
-	if len(msg.ClientInfo) > 0 {
-		b, _ := json.Marshal(msg.ClientInfo)
-		clientInfo = string(b)
-	}
-
-	var integrationData string
-	if len(msg.ClientIntegration) > 0 {
-		b, _ := json.Marshal(msg.ClientIntegration)
-		integrationData = string(b)
 	}
 
 	aiHistory := make([]ai.Message, 0, len(history))
@@ -75,94 +52,84 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		if m.Sender == SenderAI || m.Sender == SenderSupporter {
 			role = "assistant"
 		}
-		aiHistory = append(aiHistory, ai.Message{
-			Role: role,
-			Text: m.Text,
-		})
+		aiHistory = append(aiHistory, ai.Message{Role: role, Text: m.Text})
 	}
 
-	// ===== PHASE 1 — CLIENT INFO ONLY =====
-	log.Println("----- PHASE 1: CLIENT_INFO_ONLY -----")
+	clientInfo, _ := json.Marshal(msg.ClientInfo)
+	integrationData, _ := json.Marshal(msg.ClientIntegration)
 
-	respCI, err := s.checkClientInfo(
+	// ---------- STEP 1: CLIENT INFO ----------
+	respCI, _ := s.checkClientInfo(
 		ctx,
 		aiHistory,
 		msg.Text,
-		clientInfo,
-		integrationData,
+		string(clientInfo),
+		string(integrationData),
 	)
 
-	if err != nil {
-		log.Println("[phase1] error:", err)
-	} else {
-		log.Printf("[phase1] mode=%s reason=%s", respCI.Mode, respCI.Reason)
+	mode := respCI.Mode
+	answer := respCI.Answer
+	reason := respCI.Reason
+
+	if mode == "CLIENT_ONLY" {
+		vRes, _ := s.validateCases(
+			ctx,
+			aiHistory,
+			msg.Text,
+			answer,
+			reason,
+		)
+		mode = vRes.Mode
 	}
 
-	if err == nil && respCI.Mode == "CLIENT_ONLY" {
-		log.Println("[phase1] SUCCESS -> answer from client data")
+	// ---------- STEP 2: CASES ----------
+	if mode == "CASES_NEEDED" {
+		raw, err := s.ai.GetReply(
+			ctx,
+			BaseSystemPrompt,
+			NotVPNDomainPrompt,
+			string(clientInfo),
+			string(integrationData),
+			aiHistory,
+			msg.Text,
+		)
+		if err != nil {
+			return err
+		}
 
+		var resp aiResponse
+		_ = json.Unmarshal([]byte(raw), &resp)
+
+		mode = resp.Mode
+		answer = resp.Answer
+		reason = resp.Reason
+
+		if mode == "CASES_USED" {
+			vRes, _ := s.validateClientOnly(
+				ctx,
+				aiHistory,
+				msg.Text,
+				answer,
+				reason,
+			)
+			mode = vRes.Mode
+		}
+	}
+
+	// ---------- FINAL SWITCH ----------
+	if allowedModes[mode] {
 		_ = s.repo.SaveMessage(ctx, &Message{
 			ChatID: msg.ChatID,
 			Sender: SenderAI,
-			Text:   respCI.Answer,
+			Text:   answer,
 		})
-		return s.outbound.SendToChat(ctx, *msg.ClientID, respCI.Answer)
+		return s.outbound.SendToChat(ctx, *msg.ClientID, answer)
 	}
 
-	log.Println("[phase1] NOT ENOUGH -> switching to CASES")
+	note :=
+		"[AI]\nmode: " + mode + "\nreason: " + reason + "\n\n" + answer
 
-	// ===== PHASE 2 — CASES =====
-	log.Println("----- PHASE 2: CASES -----")
-
-	ctxAI, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	raw, err := s.ai.GetReply(
-		ctxAI,
-		basePrompt,
-		domainCases,
-		clientInfo,
-		integrationData,
-		aiHistory,
-		msg.Text,
-	)
-	if err != nil {
-		log.Println("[phase2] GPT error:", err)
-		return err
-	}
-
-	var resp aiResponse
-	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
-		log.Println("[phase2] JSON error:", err)
-		return errors.New("invalid AI response format")
-	}
-
-	log.Printf("[phase2] mode=%s reason=%s", resp.Mode, resp.Reason)
-
-	if !allowedModes[resp.Mode] {
-		log.Println("[phase2] BLOCKED -> sending to operator")
-
-		note :=
-			"[AI]\n" +
-				"mode: " + resp.Mode + "\n" +
-				"reason: " + resp.Reason + "\n\n" +
-				resp.Answer
-
-		return s.outbound.SendNote(ctx, *msg.ClientID, note)
-	}
-
-	log.Println("[phase2] ALLOWED -> sending to client")
-
-	if err := s.repo.SaveMessage(ctx, &Message{
-		ChatID: msg.ChatID,
-		Sender: SenderAI,
-		Text:   resp.Answer,
-	}); err != nil {
-		log.Println("[svc] SaveMessage(ai) error:", err)
-		return err
-	}
-
-	return s.outbound.SendToChat(ctx, *msg.ClientID, resp.Answer)
+	return s.outbound.SendNote(ctx, *msg.ClientID, note)
 }
 
 func (s *service) checkClientInfo(
@@ -201,6 +168,76 @@ func (s *service) SaveOnly(ctx context.Context, msg *Message) error {
 	return s.repo.SaveMessage(ctx, msg)
 }
 
-func formatFloat(v float64) string {
-	return strconv.FormatFloat(v, 'f', 2, 64)
+type ValidatorResult struct {
+	Mode string `json:"mode"`
+}
+
+func (s *service) validateClientOnly(
+	ctx context.Context,
+	history []ai.Message,
+	lastUserText string,
+	answer string,
+	reason string,
+) (*ValidatorResult, error) {
+
+	input := struct {
+		History        []ai.Message `json:"history"`
+		LastUserText   string       `json:"last_user_text"`
+		ProposedAnswer string       `json:"proposed_answer"`
+		Reason         string       `json:"reason"`
+	}{
+		History:        history,
+		LastUserText:   lastUserText,
+		ProposedAnswer: answer,
+		Reason:         reason,
+	}
+
+	b, _ := json.Marshal(input)
+
+	raw, err := s.ai.SimpleJSON(ctx, ValidatorClientOnlyPrompt, string(b))
+	if err != nil {
+		return nil, err
+	}
+
+	var res ValidatorResult
+	if err := json.Unmarshal([]byte(raw), &res); err != nil {
+		return nil, err
+	}
+
+	return &res, nil
+}
+
+func (s *service) validateCases(
+	ctx context.Context,
+	history []ai.Message,
+	lastUserText string,
+	answer string,
+	reason string,
+) (*ValidatorResult, error) {
+
+	input := struct {
+		History        []ai.Message `json:"history"`
+		LastUserText   string       `json:"last_user_text"`
+		ProposedAnswer string       `json:"proposed_answer"`
+		Reason         string       `json:"reason"`
+	}{
+		History:        history,
+		LastUserText:   lastUserText,
+		ProposedAnswer: answer,
+		Reason:         reason,
+	}
+
+	b, _ := json.Marshal(input)
+
+	raw, err := s.ai.SimpleJSON(ctx, ValidatorCasesPrompt, string(b))
+	if err != nil {
+		return nil, err
+	}
+
+	var res ValidatorResult
+	if err := json.Unmarshal([]byte(raw), &res); err != nil {
+		return nil, err
+	}
+
+	return &res, nil
 }

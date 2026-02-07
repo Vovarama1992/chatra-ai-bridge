@@ -13,6 +13,13 @@ type AI interface {
 		history []Message,
 		lastUserMessage string,
 	) (string, error)
+
+	// Простой JSON-вызов для валидаторов
+	SimpleJSON(
+		ctx context.Context,
+		systemPrompt string,
+		userInput string,
+	) (string, error)
 }
 
 // Message — универсальный формат диалога для AI

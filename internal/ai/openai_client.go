@@ -126,3 +126,50 @@ NEED_OPERATOR
 
 	return raw, nil
 }
+
+func (c *OpenAIClient) SimpleJSON(
+	ctx context.Context,
+	systemPrompt string,
+	userInput string,
+) (string, error) {
+
+	const jsonGuard = `
+Отвечай ТОЛЬКО валидным JSON.
+Никакого текста вне JSON.
+`
+
+	msgs := []openai.ChatCompletionMessage{
+		{
+			Role:    "system",
+			Content: systemPrompt,
+		},
+		{
+			Role:    "user",
+			Content: userInput,
+		},
+		{
+			Role:    "system",
+			Content: jsonGuard,
+		},
+	}
+
+	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model:    c.model,
+		Messages: msgs,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if len(resp.Choices) == 0 {
+		return "", nil
+	}
+
+	raw := resp.Choices[0].Message.Content
+
+	log.Println("[ai] SIMPLE JSON >>>")
+	log.Println(raw)
+	log.Println("<<< END SIMPLE JSON")
+
+	return raw, nil
+}
