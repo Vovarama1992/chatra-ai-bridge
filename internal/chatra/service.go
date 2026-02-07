@@ -106,7 +106,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		answer = resp.Answer
 		reason = resp.Reason
 
-		if mode == "CASES_USED" {
+		if mode == "CASES_USED" || mode == "CLIENT_ONLY" {
 			vRes, _ := s.validateCases(
 				ctx,
 				aiHistory,
@@ -225,7 +225,7 @@ func (s *service) validateCases(
 		reason,
 		clientInfo,
 		integrationData,
-		NotVPNDomainPrompt, // ← вот это критично
+		NotVPNDomainPrompt, // DOMAIN CASES (полный список), валидатор сам ищет CASE_* из reason
 	)
 	if err != nil {
 		return nil, err
