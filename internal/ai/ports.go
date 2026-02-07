@@ -6,12 +6,8 @@ import "context"
 type AI interface {
 	GetReply(
 		ctx context.Context,
-		basePrompt string,
-		domainCases string,
-		clientInfo string,
-		integrationData string,
-		history []Message,
-		lastUserMessage string,
+		systemPrompt string,
+		inputJSON string,
 	) (string, error)
 
 	// Простой JSON-вызов для валидаторов

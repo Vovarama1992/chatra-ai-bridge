@@ -8,11 +8,6 @@ import (
 	"github.com/Vovarama1992/chatra-ai-bridge/internal/ai"
 )
 
-var allowedModes = map[string]bool{
-	// "CLIENT_ONLY": true,
-	// "CASES_USED":  true,
-}
-
 type service struct {
 	repo     Repo
 	ai       ai.AI
@@ -27,24 +22,24 @@ func NewService(repo Repo, aiClient ai.AI, outbound Outbound) Service {
 	}
 }
 
-type aiResponse struct {
-	Answer string `json:"answer"`
-	Mode   string `json:"mode"`
-	Reason string `json:"reason"`
+type aiFacts struct {
+	Facts []string `json:"facts"`
+	Mode  string   `json:"mode"`
+}
+
+type aiAnswer struct {
+	Answer string   `json:"answer"`
+	Facts  []string `json:"facts"`
+	Mode   string   `json:"mode"`
 }
 
 func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
-	log.Printf("\n========== NEW MESSAGE ==========")
+	log.Println("========== NEW MESSAGE ==========")
 	log.Printf("[svc] chatId=%s text=%q", msg.ChatID, msg.Text)
 
-	if err := s.repo.SaveMessage(ctx, msg); err != nil {
-		return err
-	}
+	_ = s.repo.SaveMessage(ctx, msg)
 
-	history, err := s.repo.GetHistory(ctx, msg.ChatID)
-	if err != nil {
-		return err
-	}
+	history, _ := s.repo.GetHistory(ctx, msg.ChatID)
 
 	aiHistory := make([]ai.Message, 0, len(history))
 	for _, m := range history {
@@ -58,8 +53,8 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	clientInfo, _ := json.Marshal(msg.ClientInfo)
 	integrationData, _ := json.Marshal(msg.ClientIntegration)
 
-	// ---------- STEP 1: CLIENT INFO ----------
-	respCI, _ := s.checkClientInfo(
+	// ---------- STEP 1: FACT SELECTOR ----------
+	factsResp, _ := s.selectFacts(
 		ctx,
 		aiHistory,
 		msg.Text,
@@ -67,102 +62,180 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		string(integrationData),
 	)
 
-	mode := respCI.Mode
-	answer := respCI.Answer
-	reason := respCI.Reason
+	s.logStage("FACT_SELECTOR", factsResp)
 
-	if mode == "CLIENT_ONLY" {
-		vRes, _ := s.validateClientOnly(
-			ctx,
-			aiHistory,
-			msg.Text,
-			answer,
-			reason,
-			string(clientInfo),
-			string(integrationData),
-		)
-		mode = vRes.Mode
+	if factsResp.Mode == "NEED_OPERATOR" {
+		s.logStage("FACT_SELECTOR_FAIL", factsResp)
+		return s.sendNote(ctx, msg, "FACT_SELECTOR → NEED_OPERATOR")
 	}
 
-	// ---------- STEP 2: CASES ----------
-	if mode == "CASES_NEEDED" {
-		raw, err := s.ai.GetReply(
-			ctx,
-			BaseSystemPrompt,
-			NotVPNDomainPrompt,
-			string(clientInfo),
-			string(integrationData),
-			aiHistory,
-			msg.Text,
-		)
-		if err != nil {
-			return err
-		}
+	// ---------- STEP 2: FACT VALIDATOR ----------
+	ok, _ := s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts)
 
-		var resp aiResponse
-		_ = json.Unmarshal([]byte(raw), &resp)
+	s.logStage("FACT_VALIDATOR", map[string]any{
+		"facts": factsResp.Facts,
+		"ok":    ok,
+	})
 
-		mode = resp.Mode
-		answer = resp.Answer
-		reason = resp.Reason
-
-		if mode == "CASES_USED" || mode == "CLIENT_ONLY" {
-			vRes, _ := s.validateCases(
-				ctx,
-				aiHistory,
-				msg.Text,
-				answer,
-				reason,
-				string(clientInfo),
-				string(integrationData),
-			)
-			mode = vRes.Mode
-		}
+	if !ok {
+		return s.sendNote(ctx, msg, "FACT_VALIDATOR → NEED_OPERATOR")
 	}
 
-	// ---------- FINAL SWITCH ----------
-	if allowedModes[mode] {
-		_ = s.repo.SaveMessage(ctx, &Message{
-			ChatID: msg.ChatID,
-			Sender: SenderAI,
-			Text:   answer,
-		})
-		return s.outbound.SendToChat(ctx, *msg.ClientID, answer)
+	// ---------- STEP 3: ANSWER BUILDER ----------
+	answerResp, _ := s.buildAnswer(
+		ctx,
+		aiHistory,
+		msg.Text,
+		factsResp.Facts,
+	)
+
+	s.logStage("ANSWER_BUILDER", answerResp)
+
+	if answerResp.Mode == "NEED_OPERATOR" {
+		s.logStage("ANSWER_BUILDER_FAIL", answerResp)
+		return s.sendNote(ctx, msg, "ANSWER_BUILDER → NEED_OPERATOR")
 	}
 
-	note :=
-		"[AI]\nmode: " + mode + "\nreason: " + reason + "\n\n" + answer
+	// ---------- STEP 4: ANSWER VALIDATOR ----------
+	ok, _ = s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts)
 
-	return s.outbound.SendNote(ctx, *msg.ClientID, note)
+	s.logStage("ANSWER_VALIDATOR", map[string]any{
+		"answer": short(answerResp.Answer),
+		"facts":  answerResp.Facts,
+		"ok":     ok,
+	})
+
+	if !ok {
+		return s.sendNote(ctx, msg, "ANSWER_VALIDATOR → NEED_OPERATOR")
+	}
+
+	// ---------- SUCCESS ----------
+	_ = s.repo.SaveMessage(ctx, &Message{
+		ChatID: msg.ChatID,
+		Sender: SenderAI,
+		Text:   answerResp.Answer,
+	})
+
+	return s.outbound.SendToChat(ctx, *msg.ClientID, answerResp.Answer)
 }
 
-func (s *service) checkClientInfo(
+// ------------------------------------------------------------
+
+func (s *service) selectFacts(
 	ctx context.Context,
 	history []ai.Message,
 	lastUserText string,
 	clientInfo string,
 	integrationData string,
-) (aiResponse, error) {
+) (aiFacts, error) {
 
-	raw, err := s.ai.GetReply(
-		ctx,
-		ClientInfoOnlyPrompt,
-		"",
-		clientInfo,
-		integrationData,
-		history,
-		lastUserText,
-	)
+	input := map[string]any{
+		"history":                 history,
+		"last_user_text":          lastUserText,
+		"client_info":             clientInfo,
+		"client_integration_data": integrationData,
+		"cases":                   NotVPNDomainPrompt,
+	}
+
+	b, _ := json.Marshal(input)
+
+	raw, err := s.ai.GetReply(ctx, FactSelectorPrompt, string(b))
 	if err != nil {
-		return aiResponse{}, err
+		return aiFacts{}, err
 	}
 
-	var resp aiResponse
-	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
-		return aiResponse{}, err
-	}
-
+	var resp aiFacts
+	_ = json.Unmarshal([]byte(raw), &resp)
 	return resp, nil
+}
+
+func (s *service) validateFacts(
+	ctx context.Context,
+	history []ai.Message,
+	lastUserText string,
+	facts []string,
+) (bool, error) {
+
+	input := map[string]any{
+		"history":        history,
+		"last_user_text": lastUserText,
+		"facts":          facts,
+	}
+
+	b, _ := json.Marshal(input)
+
+	raw, err := s.ai.GetReply(ctx, FactValidatorPrompt, string(b))
+	if err != nil {
+		return false, err
+	}
+
+	var resp struct {
+		Mode string `json:"mode"`
+	}
+	_ = json.Unmarshal([]byte(raw), &resp)
+
+	return resp.Mode == "SELF_CONFIDENCE", nil
+}
+
+func (s *service) buildAnswer(
+	ctx context.Context,
+	history []ai.Message,
+	lastUserText string,
+	facts []string,
+) (aiAnswer, error) {
+
+	input := map[string]any{
+		"history":        history,
+		"last_user_text": lastUserText,
+		"facts":          facts,
+	}
+
+	b, _ := json.Marshal(input)
+
+	raw, err := s.ai.GetReply(ctx, AnswerBuilderPrompt, string(b))
+	if err != nil {
+		return aiAnswer{}, err
+	}
+
+	var resp aiAnswer
+	_ = json.Unmarshal([]byte(raw), &resp)
+	return resp, nil
+}
+
+func (s *service) validateAnswer(
+	ctx context.Context,
+	lastUserText string,
+	answer string,
+	facts []string,
+) (bool, error) {
+
+	input := map[string]any{
+		"last_user_text": lastUserText,
+		"answer":         answer,
+		"facts":          facts,
+	}
+
+	b, _ := json.Marshal(input)
+
+	raw, err := s.ai.GetReply(ctx, AnswerValidatorPrompt, string(b))
+	if err != nil {
+		return false, err
+	}
+
+	var resp struct {
+		Mode string `json:"mode"`
+	}
+	_ = json.Unmarshal([]byte(raw), &resp)
+
+	return resp.Mode == "SELF_CONFIDENCE", nil
+}
+
+// ------------------------------------------------------------
+
+func (s *service) sendNote(ctx context.Context, msg *Message, reason string) error {
+	note := "[AI PIPELINE]\n" + reason
+	log.Println("[AI][NOTE]", reason)
+	return s.outbound.SendNote(ctx, *msg.ClientID, note)
 }
 
 func (s *service) SaveOnly(ctx context.Context, msg *Message) error {
@@ -172,66 +245,14 @@ func (s *service) SaveOnly(ctx context.Context, msg *Message) error {
 	return s.repo.SaveMessage(ctx, msg)
 }
 
-type ValidatorResult struct {
-	Mode string `json:"mode"`
+func short(s string) string {
+	if len(s) > 180 {
+		return s[:180] + "..."
+	}
+	return s
 }
 
-func (s *service) validateClientOnly(
-	ctx context.Context,
-	history []ai.Message,
-	lastUserText string,
-	answer string,
-	reason string,
-	clientInfo string,
-	integrationData string,
-) (*ValidatorResult, error) {
-
-	raw, err := s.ai.GetValidationReply(
-		ctx,
-		ValidatorClientOnlyPrompt,
-		history,
-		lastUserText,
-		answer,
-		reason,
-		clientInfo,
-		integrationData,
-		"", // кейсов нет
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var res ValidatorResult
-	_ = json.Unmarshal([]byte(raw), &res)
-	return &res, nil
-}
-
-func (s *service) validateCases(
-	ctx context.Context,
-	history []ai.Message,
-	lastUserText string,
-	answer string,
-	reason string,
-	clientInfo string,
-	integrationData string,
-) (*ValidatorResult, error) {
-
-	raw, err := s.ai.GetValidationReply(
-		ctx,
-		ValidatorCasesPrompt,
-		history,
-		lastUserText,
-		answer,
-		reason,
-		clientInfo,
-		integrationData,
-		NotVPNDomainPrompt, // DOMAIN CASES (полный список), валидатор сам ищет CASE_* из reason
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var res ValidatorResult
-	_ = json.Unmarshal([]byte(raw), &res)
-	return &res, nil
+func (s *service) logStage(stage string, payload any) {
+	b, _ := json.Marshal(payload)
+	log.Printf("[AI][%s] %s", stage, short(string(b)))
 }

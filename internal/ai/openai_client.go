@@ -33,77 +33,20 @@ func NewOpenAIClient() *OpenAIClient {
 
 func (c *OpenAIClient) GetReply(
 	ctx context.Context,
-	basePrompt string,
-	domainCases string,
-	clientInfo string,
-	integrationData string,
-	history []Message,
-	lastUserMessage string,
+	systemPrompt string,
+	inputJSON string,
 ) (string, error) {
 
-	const jsonGuard = `
-Отвечай ТОЛЬКО валидным JSON.
-Никакого текста вне JSON.
-Формат строго:
-{"answer":"строка","mode":"строка","reason":"строка"}
-Где mode обязательно одно из:
-CLIENT_ONLY
-CASES_USED
-NEED_OPERATOR
-
-Если нарушишь формат — ответ будет отброшен.
-`
-
-	msgs := make([]openai.ChatCompletionMessage, 0)
-
-	// 1) SYSTEM — как работать
-	msgs = append(msgs, openai.ChatCompletionMessage{
-		Role:    "system",
-		Content: basePrompt,
-	})
-
-	// 2) USER — база кейсов (DOMAIN CASES)
-	if domainCases != "" {
-		msgs = append(msgs, openai.ChatCompletionMessage{
+	msgs := []openai.ChatCompletionMessage{
+		{
+			Role:    "system",
+			Content: systemPrompt,
+		},
+		{
 			Role:    "user",
-			Content: domainCases,
-		})
+			Content: inputJSON,
+		},
 	}
-	// 3) CLIENT INFO
-	if clientInfo != "" {
-		msgs = append(msgs, openai.ChatCompletionMessage{
-			Role:    "system",
-			Content: "[CLIENT INFO]\n" + clientInfo,
-		})
-	}
-
-	// 4) CLIENT INTEGRATION DATA
-	if integrationData != "" {
-		msgs = append(msgs, openai.ChatCompletionMessage{
-			Role:    "system",
-			Content: "[CLIENT INTEGRATION DATA]\n" + integrationData,
-		})
-	}
-
-	// 5) История
-	for _, m := range history {
-		msgs = append(msgs, openai.ChatCompletionMessage{
-			Role:    m.Role,
-			Content: m.Text,
-		})
-	}
-
-	// 6) Последнее сообщение — главный сигнал
-	msgs = append(msgs, openai.ChatCompletionMessage{
-		Role:    "user",
-		Content: lastUserMessage,
-	})
-
-	// 7) JSON guard в конце
-	msgs = append(msgs, openai.ChatCompletionMessage{
-		Role:    "system",
-		Content: jsonGuard,
-	})
 
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:    c.model,
@@ -115,7 +58,6 @@ NEED_OPERATOR
 	}
 
 	if len(resp.Choices) == 0 {
-		log.Println("[ai] empty choices")
 		return "", nil
 	}
 
