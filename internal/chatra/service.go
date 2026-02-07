@@ -183,7 +183,7 @@ func (s *service) validateClientOnly(
 	raw, err := s.ai.GetValidationReply(
 		ctx,
 		ValidatorClientOnlyPrompt,
-		history,
+		history, // <-- ai.Message
 		lastUserText,
 		answer,
 		reason,
@@ -211,7 +211,7 @@ func (s *service) validateCases(
 	raw, err := s.ai.GetValidationReply(
 		ctx,
 		ValidatorCasesPrompt,
-		history,
+		history, // <-- ai.Message
 		lastUserText,
 		answer,
 		reason,
