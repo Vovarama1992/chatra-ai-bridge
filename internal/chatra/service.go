@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 
 	"github.com/Vovarama1992/chatra-ai-bridge/internal/ai"
 )
@@ -13,6 +14,8 @@ type service struct {
 	ai       ai.AI
 	outbound Outbound
 }
+
+var allowedModes = map[string]bool{}
 
 func NewService(repo Repo, aiClient ai.AI, outbound Outbound) Service {
 	return &service{
@@ -38,7 +41,6 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	log.Printf("[svc] chatId=%s text=%q", msg.ChatID, msg.Text)
 
 	_ = s.repo.SaveMessage(ctx, msg)
-
 	history, _ := s.repo.GetHistory(ctx, msg.ChatID)
 
 	aiHistory := make([]ai.Message, 0, len(history))
@@ -53,7 +55,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	clientInfo, _ := json.Marshal(msg.ClientInfo)
 	integrationData, _ := json.Marshal(msg.ClientIntegration)
 
-	// ---------- STEP 1: FACT SELECTOR ----------
+	// STEP 1 — FACT SELECTOR
 	factsResp, _ := s.selectFacts(
 		ctx,
 		aiHistory,
@@ -65,23 +67,18 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	s.logStage("FACT_SELECTOR", factsResp)
 
 	if factsResp.Mode == "NEED_OPERATOR" {
-		s.logStage("FACT_SELECTOR_FAIL", factsResp)
-		return s.sendNote(ctx, msg, "FACT_SELECTOR → NEED_OPERATOR")
+		return s.sendFullNote(ctx, msg, "FACT_SELECTOR", factsResp, "", "")
 	}
 
-	// ---------- STEP 2: FACT VALIDATOR ----------
+	// STEP 2 — FACT VALIDATOR
 	ok, _ := s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts)
-
-	s.logStage("FACT_VALIDATOR", map[string]any{
-		"facts": factsResp.Facts,
-		"ok":    ok,
-	})
+	s.logStage("FACT_VALIDATOR", ok)
 
 	if !ok {
-		return s.sendNote(ctx, msg, "FACT_VALIDATOR → NEED_OPERATOR")
+		return s.sendFullNote(ctx, msg, "FACT_VALIDATOR", factsResp, "", "")
 	}
 
-	// ---------- STEP 3: ANSWER BUILDER ----------
+	// STEP 3 — ANSWER BUILDER
 	answerResp, _ := s.buildAnswer(
 		ctx,
 		aiHistory,
@@ -92,31 +89,28 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	s.logStage("ANSWER_BUILDER", answerResp)
 
 	if answerResp.Mode == "NEED_OPERATOR" {
-		s.logStage("ANSWER_BUILDER_FAIL", answerResp)
-		return s.sendNote(ctx, msg, "ANSWER_BUILDER → NEED_OPERATOR")
+		return s.sendFullNote(ctx, msg, "ANSWER_BUILDER", factsResp, answerResp.Answer, answerResp.Mode)
 	}
 
-	// ---------- STEP 4: ANSWER VALIDATOR ----------
+	// STEP 4 — ANSWER VALIDATOR
 	ok, _ = s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts)
-
-	s.logStage("ANSWER_VALIDATOR", map[string]any{
-		"answer": short(answerResp.Answer),
-		"facts":  answerResp.Facts,
-		"ok":     ok,
-	})
+	s.logStage("ANSWER_VALIDATOR", ok)
 
 	if !ok {
-		return s.sendNote(ctx, msg, "ANSWER_VALIDATOR → NEED_OPERATOR")
+		return s.sendFullNote(ctx, msg, "ANSWER_VALIDATOR", factsResp, answerResp.Answer, answerResp.Mode)
 	}
 
-	// ---------- SUCCESS ----------
-	_ = s.repo.SaveMessage(ctx, &Message{
-		ChatID: msg.ChatID,
-		Sender: SenderAI,
-		Text:   answerResp.Answer,
-	})
+	// ---------- ФИНАЛЬНОЕ РЕШЕНИЕ ПО MODE ----------
+	if allowedModes[answerResp.Mode] {
+		_ = s.repo.SaveMessage(ctx, &Message{
+			ChatID: msg.ChatID,
+			Sender: SenderAI,
+			Text:   answerResp.Answer,
+		})
+		return s.outbound.SendToChat(ctx, *msg.ClientID, answerResp.Answer)
+	}
 
-	return s.outbound.SendToChat(ctx, *msg.ClientID, answerResp.Answer)
+	return s.sendFullNote(ctx, msg, "MODE_NOT_ALLOWED", factsResp, answerResp.Answer, answerResp.Mode)
 }
 
 // ------------------------------------------------------------
@@ -235,6 +229,30 @@ func (s *service) validateAnswer(
 func (s *service) sendNote(ctx context.Context, msg *Message, reason string) error {
 	note := "[AI PIPELINE]\n" + reason
 	log.Println("[AI][NOTE]", reason)
+	return s.outbound.SendNote(ctx, *msg.ClientID, note)
+}
+
+func (s *service) sendFullNote(
+	ctx context.Context,
+	msg *Message,
+	stage string,
+	facts aiFacts,
+	answer string,
+	mode string,
+) error {
+
+	note := `
+[AI PIPELINE FAIL]
+
+Stage: ` + stage + `
+Mode: ` + mode + `
+
+Facts:
+` + strings.Join(facts.Facts, "\n") + `
+
+Answer:
+` + answer
+
 	return s.outbound.SendNote(ctx, *msg.ClientID, note)
 }
 
