@@ -30,24 +30,24 @@ func (c *OpenAIClient) GetReply(
 	inputJSON string,
 ) (string, error) {
 
-	model, temperature := c.pickModelAndTemp(systemPrompt)
+	model := c.pickModel(systemPrompt)
 
 	msgs := []openai.ChatCompletionMessage{
-		{
-			Role:    "system",
-			Content: systemPrompt,
-		},
-		{
-			Role:    "user",
-			Content: inputJSON,
-		},
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: inputJSON},
 	}
 
-	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model:       model,
-		Messages:    msgs,
-		Temperature: temperature,
-	})
+	req := openai.ChatCompletionRequest{
+		Model:    model,
+		Messages: msgs,
+	}
+
+	// GPT-5 запрещает temperature/top_p/n — не отправляем их
+	if !strings.HasPrefix(model, "gpt-5") {
+		req.Temperature = 0
+	}
+
+	resp, err := c.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		log.Println("[ai] OpenAI error:", err)
 		return "", err
@@ -58,32 +58,31 @@ func (c *OpenAIClient) GetReply(
 	}
 
 	raw := resp.Choices[0].Message.Content
-
-	log.Printf("[ai][%s][t=%.1f] >>>\n%s\n<<< END\n", model, temperature, raw)
+	log.Printf("[ai][%s] >>>\n%s\n<<< END\n", model, raw)
 
 	return raw, nil
 }
 
-func (c *OpenAIClient) pickModelAndTemp(systemPrompt string) (string, float32) {
+func (c *OpenAIClient) pickModel(systemPrompt string) string {
 
 	switch {
-	// ---- ТУПОЙ СБОРЩИК ФАКТОВ ----
+	// ТУПОЙ сбор фактов
 	case strings.Contains(systemPrompt, "FACT SELECTOR"):
-		return "gpt-4o-mini", 0.0
+		return "gpt-4o-mini"
 
-	// ---- УМНЫЙ ЛОГИК ----
+	// УМНЫЙ логик
 	case strings.Contains(systemPrompt, "FACT VALIDATOR"):
-		return "gpt-5.2", 0.0
+		return "gpt-5.2"
 
-	// ---- УМНЫЙ ПИСАТЕЛЬ ----
+	// УМНЫЙ писатель
 	case strings.Contains(systemPrompt, "ANSWER BUILDER"):
-		return "gpt-5.2", 0.3
+		return "gpt-5.2"
 
-	// ---- УМНЫЙ ПРОКУРОР ----
+	// УМНЫЙ прокурор
 	case strings.Contains(systemPrompt, "ANSWER VALIDATOR"):
-		return "gpt-5.2", 0.0
+		return "gpt-5.2"
 
 	default:
-		return "gpt-4o-mini", 0.0
+		return "gpt-4o-mini"
 	}
 }
