@@ -64,7 +64,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		string(integrationData),
 	)
 
-	s.logStage("FACT_SELECTOR", factsResp)
+	s.logStage("FACT_SELECTOR_PARSED", factsResp)
 
 	if factsResp.Mode == "NEED_OPERATOR" {
 		return s.sendFullNote(ctx, msg, "FACT_SELECTOR", factsResp, "", "")
@@ -72,7 +72,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 
 	// STEP 2 — FACT VALIDATOR
 	ok, _ := s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts)
-	s.logStage("FACT_VALIDATOR", ok)
+	s.logStage("FACT_VALIDATOR_PARSED", ok)
 
 	if !ok {
 		return s.sendFullNote(ctx, msg, "FACT_VALIDATOR", factsResp, "", "")
@@ -86,7 +86,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		factsResp.Facts,
 	)
 
-	s.logStage("ANSWER_BUILDER", answerResp)
+	s.logStage("ANSWER_BUILDER_PARSED", answerResp)
 
 	if answerResp.Mode == "NEED_OPERATOR" {
 		return s.sendFullNote(ctx, msg, "ANSWER_BUILDER", factsResp, answerResp.Answer, answerResp.Mode)
@@ -94,7 +94,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 
 	// STEP 4 — ANSWER VALIDATOR
 	ok, _ = s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts)
-	s.logStage("ANSWER_VALIDATOR", ok)
+	s.logStage("ANSWER_VALIDATOR_PARSED", ok)
 
 	if !ok {
 		return s.sendFullNote(ctx, msg, "ANSWER_VALIDATOR", factsResp, answerResp.Answer, answerResp.Mode)
@@ -138,8 +138,12 @@ func (s *service) selectFacts(
 		return aiFacts{}, err
 	}
 
+	log.Printf("[FACT_SELECTOR][RAW] %s", short(raw))
+
 	var resp aiFacts
-	_ = json.Unmarshal([]byte(raw), &resp)
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		log.Printf("[FACT_SELECTOR][JSON_ERR] %v", err)
+	}
 	return resp, nil
 }
 
@@ -163,10 +167,14 @@ func (s *service) validateFacts(
 		return false, err
 	}
 
+	log.Printf("[FACT_VALIDATOR][RAW] %s", short(raw))
+
 	var resp struct {
 		Mode string `json:"mode"`
 	}
-	_ = json.Unmarshal([]byte(raw), &resp)
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		log.Printf("[FACT_VALIDATOR][JSON_ERR] %v", err)
+	}
 
 	return resp.Mode == "SELF_CONFIDENCE", nil
 }
@@ -191,8 +199,12 @@ func (s *service) buildAnswer(
 		return aiAnswer{}, err
 	}
 
+	log.Printf("[ANSWER_BUILDER][RAW] %s", short(raw))
+
 	var resp aiAnswer
-	_ = json.Unmarshal([]byte(raw), &resp)
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		log.Printf("[ANSWER_BUILDER][JSON_ERR] %v", err)
+	}
 	return resp, nil
 }
 
@@ -216,10 +228,14 @@ func (s *service) validateAnswer(
 		return false, err
 	}
 
+	log.Printf("[ANSWER_VALIDATOR][RAW] %s", short(raw))
+
 	var resp struct {
 		Mode string `json:"mode"`
 	}
-	_ = json.Unmarshal([]byte(raw), &resp)
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		log.Printf("[ANSWER_VALIDATOR][JSON_ERR] %v", err)
+	}
 
 	return resp.Mode == "SELF_CONFIDENCE", nil
 }
