@@ -33,18 +33,19 @@ func (c *OpenAIClient) GetReply(
 	model := c.pickModel(systemPrompt)
 
 	msgs := []openai.ChatCompletionMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: inputJSON},
+		{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: systemPrompt,
+		},
+		{
+			Role:    openai.ChatMessageRoleUser,
+			Content: inputJSON,
+		},
 	}
 
 	req := openai.ChatCompletionRequest{
 		Model:    model,
 		Messages: msgs,
-	}
-
-	// GPT-5 запрещает temperature/top_p/n — не отправляем их
-	if !strings.HasPrefix(model, "gpt-5") {
-		req.Temperature = 0
 	}
 
 	resp, err := c.client.CreateChatCompletion(ctx, req)
@@ -66,19 +67,15 @@ func (c *OpenAIClient) GetReply(
 func (c *OpenAIClient) pickModel(systemPrompt string) string {
 
 	switch {
-	// ТУПОЙ сбор фактов
 	case strings.Contains(systemPrompt, "FACT SELECTOR"):
 		return "gpt-4o-mini"
 
-	// УМНЫЙ логик
 	case strings.Contains(systemPrompt, "FACT VALIDATOR"):
 		return "gpt-5.2"
 
-	// УМНЫЙ писатель
 	case strings.Contains(systemPrompt, "ANSWER BUILDER"):
 		return "gpt-5.2"
 
-	// УМНЫЙ прокурор
 	case strings.Contains(systemPrompt, "ANSWER VALIDATOR"):
 		return "gpt-5.2"
 
