@@ -30,7 +30,7 @@ func (c *OpenAIClient) GetReply(
 	inputJSON string,
 ) (string, error) {
 
-	model := c.pickModel(systemPrompt)
+	model, temperature := c.pickModelAndTemp(systemPrompt)
 
 	msgs := []openai.ChatCompletionMessage{
 		{
@@ -44,8 +44,9 @@ func (c *OpenAIClient) GetReply(
 	}
 
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model:    model,
-		Messages: msgs,
+		Model:       model,
+		Messages:    msgs,
+		Temperature: temperature,
 	})
 	if err != nil {
 		log.Println("[ai] OpenAI error:", err)
@@ -58,27 +59,31 @@ func (c *OpenAIClient) GetReply(
 
 	raw := resp.Choices[0].Message.Content
 
-	log.Printf("[ai][%s] >>>\n%s\n<<< END\n", model, raw)
+	log.Printf("[ai][%s][t=%.1f] >>>\n%s\n<<< END\n", model, temperature, raw)
 
 	return raw, nil
 }
 
-func (c *OpenAIClient) pickModel(systemPrompt string) string {
+func (c *OpenAIClient) pickModelAndTemp(systemPrompt string) (string, float32) {
 
 	switch {
+	// ---- ТУПОЙ СБОРЩИК ФАКТОВ ----
 	case strings.Contains(systemPrompt, "FACT SELECTOR"):
-		return "gpt-4o-mini"
+		return "gpt-4o-mini", 0.0
 
+	// ---- УМНЫЙ ЛОГИК ----
 	case strings.Contains(systemPrompt, "FACT VALIDATOR"):
-		return "gpt-4o-mini"
+		return "gpt-5.2", 0.0
 
+	// ---- УМНЫЙ ПИСАТЕЛЬ ----
 	case strings.Contains(systemPrompt, "ANSWER BUILDER"):
-		return "gpt-5.2"
+		return "gpt-5.2", 0.3
 
+	// ---- УМНЫЙ ПРОКУРОР ----
 	case strings.Contains(systemPrompt, "ANSWER VALIDATOR"):
-		return "gpt-4o-mini"
+		return "gpt-5.2", 0.0
 
 	default:
-		return "gpt-4o-mini"
+		return "gpt-4o-mini", 0.0
 	}
 }
