@@ -101,14 +101,35 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	}
 
 	// ВАЖНО: сейчас ВСЕ моды идут в заметки
-	return s.sendFullNote(
-		ctx,
-		msg,
-		"FINAL",
-		factsResp,
-		answerResp.Answer,
-		answerResp.Mode,
-	)
+	// ФИНАЛЬНОЕ РЕШЕНИЕ ПО MODE
+	if allowedModes[answerResp.Mode] {
+		log.Println("========== SEND TO CHAT ==========")
+		log.Printf("Mode: %s", answerResp.Mode)
+		log.Printf("Answer: %s", answerResp.Answer)
+
+		_ = s.repo.SaveMessage(ctx, &Message{
+			ChatID: msg.ChatID,
+			Sender: SenderAI,
+			Text:   answerResp.Answer,
+		})
+
+		return s.outbound.SendToChat(ctx, *msg.ClientID, answerResp.Answer)
+	}
+
+	// иначе — заметки ТОЛЬКО если SELF_CONFIDENCE
+	if answerResp.Mode == "SELF_CONFIDENCE" {
+		return s.sendFullNote(
+			ctx,
+			msg,
+			"FINAL",
+			factsResp,
+			answerResp.Answer,
+			answerResp.Mode,
+		)
+	}
+
+	// во всех остальных режимах — ничего не отправляем
+	return nil
 }
 
 // ------------------------------------------------------------
