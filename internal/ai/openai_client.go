@@ -32,12 +32,6 @@ func (c *OpenAIClient) GetReply(
 
 	model := c.pickModel(systemPrompt)
 
-	log.Printf("\n[AI CALL]\nMODEL: %s\nPROMPT:\n%s\nINPUT:\n%s\n---\n",
-		model,
-		short(systemPrompt),
-		short(inputJSON),
-	)
-
 	msgs := []openai.ChatCompletionMessage{
 		{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
 		{Role: openai.ChatMessageRoleUser, Content: inputJSON},
@@ -55,15 +49,10 @@ func (c *OpenAIClient) GetReply(
 	}
 
 	if len(resp.Choices) == 0 {
-		log.Printf("[AI EMPTY][%s]\n", model)
 		return "", nil
 	}
 
-	raw := resp.Choices[0].Message.Content
-
-	log.Printf("\n[AI RAW][%s]\n%s\n<<< END RAW\n", model, raw)
-
-	return raw, nil
+	return resp.Choices[0].Message.Content, nil
 }
 
 func short(s string) string {

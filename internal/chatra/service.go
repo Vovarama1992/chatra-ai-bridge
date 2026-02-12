@@ -64,18 +64,18 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		string(integrationData),
 	)
 
-	s.logStage("FACT_SELECTOR_PARSED", factsResp)
+	if factsResp.Mode == "" {
+		factsResp.Mode = "PARSE_ERROR"
+	}
 
-	if factsResp.Mode == "NEED_OPERATOR" {
-		return s.sendFullNote(ctx, msg, "FACT_SELECTOR", factsResp, "", "")
+	if factsResp.Mode != "SELF_CONFIDENCE" {
+		return s.sendFullNote(ctx, msg, "FACT_SELECTOR", factsResp, "", factsResp.Mode)
 	}
 
 	// STEP 2 — FACT VALIDATOR
 	ok, _ := s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts)
-	s.logStage("FACT_VALIDATOR_PARSED", ok)
-
 	if !ok {
-		return s.sendFullNote(ctx, msg, "FACT_VALIDATOR", factsResp, "", "")
+		return s.sendFullNote(ctx, msg, "FACT_VALIDATOR", factsResp, "", "NEED_OPERATOR")
 	}
 
 	// STEP 3 — ANSWER BUILDER
@@ -86,31 +86,29 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		factsResp.Facts,
 	)
 
-	s.logStage("ANSWER_BUILDER_PARSED", answerResp)
+	if answerResp.Mode == "" {
+		answerResp.Mode = "PARSE_ERROR"
+	}
 
-	if answerResp.Mode == "NEED_OPERATOR" {
+	if answerResp.Mode != "SELF_CONFIDENCE" {
 		return s.sendFullNote(ctx, msg, "ANSWER_BUILDER", factsResp, answerResp.Answer, answerResp.Mode)
 	}
 
 	// STEP 4 — ANSWER VALIDATOR
 	ok, _ = s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts)
-	s.logStage("ANSWER_VALIDATOR_PARSED", ok)
-
 	if !ok {
-		return s.sendFullNote(ctx, msg, "ANSWER_VALIDATOR", factsResp, answerResp.Answer, answerResp.Mode)
+		return s.sendFullNote(ctx, msg, "ANSWER_VALIDATOR", factsResp, answerResp.Answer, "NEED_OPERATOR")
 	}
 
-	// ---------- ФИНАЛЬНОЕ РЕШЕНИЕ ПО MODE ----------
-	if allowedModes[answerResp.Mode] {
-		_ = s.repo.SaveMessage(ctx, &Message{
-			ChatID: msg.ChatID,
-			Sender: SenderAI,
-			Text:   answerResp.Answer,
-		})
-		return s.outbound.SendToChat(ctx, *msg.ClientID, answerResp.Answer)
-	}
-
-	return s.sendFullNote(ctx, msg, "MODE_NOT_ALLOWED", factsResp, answerResp.Answer, answerResp.Mode)
+	// ВАЖНО: сейчас ВСЕ моды идут в заметки
+	return s.sendFullNote(
+		ctx,
+		msg,
+		"FINAL",
+		factsResp,
+		answerResp.Answer,
+		answerResp.Mode,
+	)
 }
 
 // ------------------------------------------------------------
@@ -135,15 +133,19 @@ func (s *service) selectFacts(
 
 	raw, err := s.ai.GetReply(ctx, FactSelectorPrompt, string(b))
 	if err != nil {
-		return aiFacts{}, err
+		return aiFacts{Mode: "AI_ERROR"}, err
 	}
-
-	log.Printf("[FACT_SELECTOR][RAW] %s", short(raw))
 
 	var resp aiFacts
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
-		log.Printf("[FACT_SELECTOR][JSON_ERR] %v", err)
+		log.Println("[FACT_SELECTOR JSON ERROR]", err)
+		return aiFacts{Mode: "PARSE_ERROR"}, nil
 	}
+
+	if resp.Mode == "" {
+		resp.Mode = "PARSE_ERROR"
+	}
+
 	return resp, nil
 }
 
@@ -196,15 +198,19 @@ func (s *service) buildAnswer(
 
 	raw, err := s.ai.GetReply(ctx, AnswerBuilderPrompt, string(b))
 	if err != nil {
-		return aiAnswer{}, err
+		return aiAnswer{Mode: "AI_ERROR"}, err
 	}
-
-	log.Printf("[ANSWER_BUILDER][RAW] %s", short(raw))
 
 	var resp aiAnswer
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
-		log.Printf("[ANSWER_BUILDER][JSON_ERR] %v", err)
+		log.Println("[ANSWER_BUILDER JSON ERROR]", err)
+		return aiAnswer{Mode: "PARSE_ERROR"}, nil
 	}
+
+	if resp.Mode == "" {
+		resp.Mode = "PARSE_ERROR"
+	}
+
 	return resp, nil
 }
 
@@ -242,12 +248,6 @@ func (s *service) validateAnswer(
 
 // ------------------------------------------------------------
 
-func (s *service) sendNote(ctx context.Context, msg *Message, reason string) error {
-	note := "[AI PIPELINE]\n" + reason
-	log.Println("[AI][NOTE]", reason)
-	return s.outbound.SendNote(ctx, *msg.ClientID, note)
-}
-
 func (s *service) sendFullNote(
 	ctx context.Context,
 	msg *Message,
@@ -258,16 +258,23 @@ func (s *service) sendFullNote(
 ) error {
 
 	note := `
-[AI PIPELINE FAIL]
+[AI PIPELINE]
 
 Stage: ` + stage + `
 Mode: ` + mode + `
+
+User question:
+` + msg.Text + `
 
 Facts:
 ` + strings.Join(facts.Facts, "\n") + `
 
 Answer:
-` + answer
+` + answer + `
+`
+
+	log.Println("========== NOTE TO OPERATOR ==========")
+	log.Println(note)
 
 	return s.outbound.SendNote(ctx, *msg.ClientID, note)
 }
@@ -284,9 +291,4 @@ func short(s string) string {
 		return s[:180] + "..."
 	}
 	return s
-}
-
-func (s *service) logStage(stage string, payload any) {
-	b, _ := json.Marshal(payload)
-	log.Printf("[AI][%s] %s", stage, short(string(b)))
 }
