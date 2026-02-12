@@ -68,15 +68,8 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		factsResp.Mode = "PARSE_ERROR"
 	}
 
-	if factsResp.Mode != "SELF_CONFIDENCE" {
-		return s.sendFullNote(ctx, msg, "FACT_SELECTOR", factsResp, "", factsResp.Mode)
-	}
-
 	// STEP 2 — FACT VALIDATOR
-	ok, _ := s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts)
-	if !ok {
-		return s.sendFullNote(ctx, msg, "FACT_VALIDATOR", factsResp, "", "NEED_OPERATOR")
-	}
+	s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts)
 
 	// STEP 3 — ANSWER BUILDER
 	answerResp, _ := s.buildAnswer(
@@ -90,15 +83,8 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		answerResp.Mode = "PARSE_ERROR"
 	}
 
-	if answerResp.Mode != "SELF_CONFIDENCE" {
-		return s.sendFullNote(ctx, msg, "ANSWER_BUILDER", factsResp, answerResp.Answer, answerResp.Mode)
-	}
-
 	// STEP 4 — ANSWER VALIDATOR
-	ok, _ = s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts)
-	if !ok {
-		return s.sendFullNote(ctx, msg, "ANSWER_VALIDATOR", factsResp, answerResp.Answer, "NEED_OPERATOR")
-	}
+	s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts)
 
 	// ВАЖНО: сейчас ВСЕ моды идут в заметки
 	// ФИНАЛЬНОЕ РЕШЕНИЕ ПО MODE
