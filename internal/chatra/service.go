@@ -55,10 +55,7 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	clientInfo, _ := json.Marshal(msg.ClientInfo)
 	integrationData, _ := json.Marshal(msg.ClientIntegration)
 
-	// --------------------------------------------------
 	// STEP 1 — FACT SELECTOR
-	// --------------------------------------------------
-
 	factsResp, _ := s.selectFacts(
 		ctx,
 		aiHistory,
@@ -72,72 +69,71 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	}
 
 	currentMode := factsResp.Mode
-	var finalAnswer string
+	answerResp := aiAnswer{}
 
-	// --------------------------------------------------
 	// STEP 2 — FACT VALIDATOR
-	// --------------------------------------------------
-
-	mode2, _ := s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts)
-	if mode2 != "" {
-		currentMode = mode2
+	if mode, _ := s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts); mode != "" {
+		currentMode = mode
 	}
 
-	// --------------------------------------------------
-	// STEP 3 + 4 — только если SELF_CONFIDENCE
-	// --------------------------------------------------
-
+	// STEP 3–4 — ТОЛЬКО ЕСЛИ SELF_CONFIDENCE
 	if currentMode == "SELF_CONFIDENCE" {
 
-		answerResp, _ := s.buildAnswer(
+		answerResp, _ = s.buildAnswer(
 			ctx,
 			aiHistory,
 			msg.Text,
 			factsResp.Facts,
 		)
 
-		if answerResp.Mode != "" {
-			currentMode = answerResp.Mode
+		if answerResp.Mode == "" {
+			answerResp.Mode = "PARSE_ERROR"
 		}
 
-		finalAnswer = answerResp.Answer
+		currentMode = answerResp.Mode
 
-		mode4, _ := s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts)
-		if mode4 != "" {
-			currentMode = mode4
+		if mode, _ := s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts); mode != "" {
+			currentMode = mode
 		}
 	}
 
-	// --------------------------------------------------
-	// FINAL DECISION
-	// --------------------------------------------------
+	// -------- FINAL NOTE --------
+
+	note := `
+[AI PIPELINE]
+
+Stage: FINAL
+Mode: ` + currentMode + `
+
+User question:
+` + msg.Text + `
+
+Facts:
+` + strings.Join(factsResp.Facts, "\n") + `
+
+Answer:
+` + answerResp.Answer + `
+`
 
 	if allowedModes[currentMode] {
+
 		log.Println("========== SEND TO CHAT ==========")
 		log.Printf("Mode: %s", currentMode)
-		log.Printf("Answer: %s", finalAnswer)
+		log.Printf("Answer: %s", answerResp.Answer)
 
 		_ = s.repo.SaveMessage(ctx, &Message{
 			ChatID: msg.ChatID,
 			Sender: SenderAI,
-			Text:   finalAnswer,
+			Text:   answerResp.Answer,
 		})
 
-		return s.outbound.SendToChat(ctx, *msg.ClientID, finalAnswer)
+		return s.outbound.SendToChat(ctx, *msg.ClientID, answerResp.Answer)
 	}
 
-	if currentMode == "SELF_CONFIDENCE" {
-		return s.sendFullNote(
-			ctx,
-			msg,
-			"FINAL",
-			factsResp,
-			finalAnswer,
-			currentMode,
-		)
-	}
+	log.Println("========== NOTE TO OPERATOR ==========")
+	log.Println(note)
 
-	return nil
+	return s.outbound.SendNote(ctx, *msg.ClientID, note)
 }
 
 // ------------------------------------------------------------
