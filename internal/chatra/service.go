@@ -130,6 +130,12 @@ Answer:
 		return s.outbound.SendToChat(ctx, *msg.ClientID, answerResp.Answer)
 	}
 
+	// TEMP CHECK — не спамим операторов
+	if currentMode != "SELF_CONFIDENCE" {
+		log.Printf("[TEMP] skip note, mode=%s", currentMode)
+		return nil
+	}
+
 	log.Println("========== NOTE TO OPERATOR ==========")
 	log.Println(note)
 
