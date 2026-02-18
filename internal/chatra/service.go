@@ -55,7 +55,10 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 	clientInfo, _ := json.Marshal(msg.ClientInfo)
 	integrationData, _ := json.Marshal(msg.ClientIntegration)
 
+	// --------------------------------------------------
 	// STEP 1 — FACT SELECTOR
+	// --------------------------------------------------
+
 	factsResp, _ := s.selectFacts(
 		ctx,
 		aiHistory,
@@ -68,53 +71,72 @@ func (s *service) HandleIncoming(ctx context.Context, msg *Message) error {
 		factsResp.Mode = "PARSE_ERROR"
 	}
 
+	currentMode := factsResp.Mode
+	var finalAnswer string
+
+	// --------------------------------------------------
 	// STEP 2 — FACT VALIDATOR
-	s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts)
+	// --------------------------------------------------
 
-	// STEP 3 — ANSWER BUILDER
-	answerResp, _ := s.buildAnswer(
-		ctx,
-		aiHistory,
-		msg.Text,
-		factsResp.Facts,
-	)
-
-	if answerResp.Mode == "" {
-		answerResp.Mode = "PARSE_ERROR"
+	mode2, _ := s.validateFacts(ctx, aiHistory, msg.Text, factsResp.Facts)
+	if mode2 != "" {
+		currentMode = mode2
 	}
 
-	// STEP 4 — ANSWER VALIDATOR
-	s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts)
+	// --------------------------------------------------
+	// STEP 3 + 4 — только если SELF_CONFIDENCE
+	// --------------------------------------------------
 
-	// ВАЖНО: сейчас ВСЕ моды идут в заметки
-	// ФИНАЛЬНОЕ РЕШЕНИЕ ПО MODE
-	if allowedModes[answerResp.Mode] {
+	if currentMode == "SELF_CONFIDENCE" {
+
+		answerResp, _ := s.buildAnswer(
+			ctx,
+			aiHistory,
+			msg.Text,
+			factsResp.Facts,
+		)
+
+		if answerResp.Mode != "" {
+			currentMode = answerResp.Mode
+		}
+
+		finalAnswer = answerResp.Answer
+
+		mode4, _ := s.validateAnswer(ctx, msg.Text, answerResp.Answer, answerResp.Facts)
+		if mode4 != "" {
+			currentMode = mode4
+		}
+	}
+
+	// --------------------------------------------------
+	// FINAL DECISION
+	// --------------------------------------------------
+
+	if allowedModes[currentMode] {
 		log.Println("========== SEND TO CHAT ==========")
-		log.Printf("Mode: %s", answerResp.Mode)
-		log.Printf("Answer: %s", answerResp.Answer)
+		log.Printf("Mode: %s", currentMode)
+		log.Printf("Answer: %s", finalAnswer)
 
 		_ = s.repo.SaveMessage(ctx, &Message{
 			ChatID: msg.ChatID,
 			Sender: SenderAI,
-			Text:   answerResp.Answer,
+			Text:   finalAnswer,
 		})
 
-		return s.outbound.SendToChat(ctx, *msg.ClientID, answerResp.Answer)
+		return s.outbound.SendToChat(ctx, *msg.ClientID, finalAnswer)
 	}
 
-	// иначе — заметки ТОЛЬКО если SELF_CONFIDENCE
-	if answerResp.Mode == "SELF_CONFIDENCE" {
+	if currentMode == "SELF_CONFIDENCE" {
 		return s.sendFullNote(
 			ctx,
 			msg,
 			"FINAL",
 			factsResp,
-			answerResp.Answer,
-			answerResp.Mode,
+			finalAnswer,
+			currentMode,
 		)
 	}
 
-	// во всех остальных режимах — ничего не отправляем
 	return nil
 }
 
@@ -161,7 +183,7 @@ func (s *service) validateFacts(
 	history []ai.Message,
 	lastUserText string,
 	facts []string,
-) (bool, error) {
+) (string, error) {
 
 	input := map[string]any{
 		"history":        history,
@@ -173,7 +195,7 @@ func (s *service) validateFacts(
 
 	raw, err := s.ai.GetReply(ctx, FactValidatorPrompt, string(b))
 	if err != nil {
-		return false, err
+		return "AI_ERROR", err
 	}
 
 	log.Printf("[FACT_VALIDATOR][RAW] %s", short(raw))
@@ -183,9 +205,14 @@ func (s *service) validateFacts(
 	}
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		log.Printf("[FACT_VALIDATOR][JSON_ERR] %v", err)
+		return "PARSE_ERROR", nil
 	}
 
-	return resp.Mode == "SELF_CONFIDENCE", nil
+	if resp.Mode == "" {
+		resp.Mode = "PARSE_ERROR"
+	}
+
+	return resp.Mode, nil
 }
 
 func (s *service) buildAnswer(
@@ -226,7 +253,7 @@ func (s *service) validateAnswer(
 	lastUserText string,
 	answer string,
 	facts []string,
-) (bool, error) {
+) (string, error) {
 
 	input := map[string]any{
 		"last_user_text": lastUserText,
@@ -238,7 +265,7 @@ func (s *service) validateAnswer(
 
 	raw, err := s.ai.GetReply(ctx, AnswerValidatorPrompt, string(b))
 	if err != nil {
-		return false, err
+		return "AI_ERROR", err
 	}
 
 	log.Printf("[ANSWER_VALIDATOR][RAW] %s", short(raw))
@@ -248,9 +275,14 @@ func (s *service) validateAnswer(
 	}
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		log.Printf("[ANSWER_VALIDATOR][JSON_ERR] %v", err)
+		return "PARSE_ERROR", nil
 	}
 
-	return resp.Mode == "SELF_CONFIDENCE", nil
+	if resp.Mode == "" {
+		resp.Mode = "PARSE_ERROR"
+	}
+
+	return resp.Mode, nil
 }
 
 // ------------------------------------------------------------
